@@ -10,7 +10,7 @@ router.get('/profile', (req, res, next) => {
     const profile = db.prepare('SELECT * FROM user_profile WHERE id = 1').get();
     const badges = db.prepare('SELECT * FROM badges ORDER BY earned_at DESC').all();
 
-    const examDate = process.env.EXAM_DATE || profile?.exam_date || '2026-10-19';
+    const examDate = profile?.exam_date || process.env.EXAM_DATE || '2026-10-19';
     const remainingDays = getRemainingWorkdays(examDate);
 
     const weights = JSON.parse(profile?.discipline_weights || '{"legislacao":40,"logica":35,"matematica":25}');
@@ -47,7 +47,12 @@ router.put('/profile', (req, res, next) => {
 
     if (name) { updates.push('name = ?'); values.push(name); }
     if (disciplineWeights) { updates.push('discipline_weights = ?'); values.push(JSON.stringify(disciplineWeights)); }
-    if (examDate) { updates.push('exam_date = ?'); values.push(examDate); }
+    if (examDate) { 
+      updates.push('exam_date = ?'); 
+      values.push(examDate); 
+      // Limpar marcações de dia de descanso a partir de hoje até a data da prova
+      db.prepare("DELETE FROM custom_calendar_days WHERE date >= date('now') AND is_workday = 0").run();
+    }
 
     if (updates.length > 0) {
       db.prepare(`UPDATE user_profile SET ${updates.join(', ')} WHERE id = 1`).run(...values);
@@ -147,10 +152,10 @@ router.get('/calendar', (req, res, next) => {
     ).all(String(year), String(month).padStart(2, '0')) || [];
 
     const studiedSet = studiedDatesRows.map(d => d.date);
-    const calendar = getMonthCalendar(year, month, studiedSet);
 
     const profile = db.prepare('SELECT exam_date FROM user_profile WHERE id = 1').get();
-    const examDate = process.env.EXAM_DATE || profile?.exam_date || '2026-10-19';
+    const examDate = profile?.exam_date || process.env.EXAM_DATE || '2026-10-19';
+    const calendar = getMonthCalendar(parseInt(year), parseInt(month), studiedSet);
 
     res.json({
       year,

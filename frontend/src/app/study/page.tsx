@@ -603,7 +603,7 @@ export default function StudyPage() {
                       ❌ Sua resposta: {wa.userAnswer} - {wa.question.options?.[wa.userAnswer]}
                     </span>
                     <span style={{ background: 'var(--success-dim)', color: 'var(--success)', padding: '6px 12px', borderRadius: 'var(--radius)', fontWeight: 600, alignSelf: 'flex-start', lineHeight: 1.5 }}>
-                      ✅ Correta: {wa.question.correct || wa.question.correct_answer} - {wa.question.options?.[wa.question.correct || wa.question.correct_answer]}
+                      ✅ Correta: {wa.question.correct || wa.question.correct_answer} - {wa.question.options?.[(wa.question.correct || wa.question.correct_answer || '') as string]}
                     </span>
                   </div>
                   <div className="explanation-box">

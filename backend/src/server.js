@@ -36,12 +36,16 @@ app.use('/api/gamification', require('./routes/gamification'));
 
 // Health check
 app.get('/api/health', (req, res) => {
+  const { getDb } = require('./db/database');
+  const db = getDb();
+  const profile = db.prepare('SELECT exam_date FROM user_profile WHERE id = 1').get();
+  
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     hasGemini: !!process.env.GEMINI_API_KEY,
     hasSerper: !!process.env.SERPER_API_KEY,
-    examDate: process.env.EXAM_DATE || '2026-10-19',
+    examDate: profile?.exam_date || process.env.EXAM_DATE || '2026-10-19',
   });
 });
 
@@ -58,7 +62,15 @@ app.listen(PORT, () => {
   console.log(`\n🚀 Monitor IA Backend rodando em http://localhost:${PORT}`);
   console.log(`📊 Gemini: ${process.env.GEMINI_API_KEY ? '✅ Configurado' : '⚠️  Não configurado (modo demo)'}`);
   console.log(`🔍 Serper: ${process.env.SERPER_API_KEY ? '✅ Configurado' : '⚠️  Não configurado (busca desativada)'}`);
-  console.log(`📅 Concurso: ${process.env.EXAM_DATE || '2026-10-19'}\n`);
+  
+  try {
+    const { getDb } = require('./db/database');
+    const db = getDb();
+    const profile = db.prepare('SELECT exam_date FROM user_profile WHERE id = 1').get();
+    console.log(`📅 Concurso: ${profile?.exam_date || process.env.EXAM_DATE || '2026-10-19'}\n`);
+  } catch (e) {
+    console.log(`📅 Concurso: ${process.env.EXAM_DATE || '2026-10-19'}\n`);
+  }
 });
 
 module.exports = app;

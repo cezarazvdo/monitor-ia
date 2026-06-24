@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
-import { getCalendar, toggleCalendarDay, type CalendarData } from '../../lib/api';
+import Modal from '../../components/Modal';
+import { getCalendar, toggleCalendarDay, updateProfile, type CalendarData } from '../../lib/api';
 
 const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 const DAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -11,6 +12,8 @@ export default function CalendarPage() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [data, setData] = useState<CalendarData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isEditingExamDate, setIsEditingExamDate] = useState(false);
+  const [examDateInput, setExamDateInput] = useState('');
 
   useEffect(() => {
     setLoading(true);
@@ -45,6 +48,19 @@ export default function CalendarPage() {
   const firstDayOfWeek = data ? new Date(year, month - 1, 1).getDay() : 0;
   const examDate = data?.examDate || '2026-10-19';
 
+  async function handleUpdateExamDate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!examDateInput) return;
+    try {
+      await updateProfile({ examDate: examDateInput });
+      setIsEditingExamDate(false);
+      const freshData = await getCalendar(year, month);
+      setData(freshData);
+    } catch (err) {
+      console.error('Erro ao atualizar data da prova', err);
+    }
+  }
+
   return (
     <div className="layout">
       <Sidebar />
@@ -61,8 +77,49 @@ export default function CalendarPage() {
             <span className="stat-value" style={{ color: data && data.remainingWorkdays < 20 ? 'var(--error)' : data && data.remainingWorkdays < 40 ? 'var(--warning)' : 'var(--success)' }}>
               {data?.remainingWorkdays ?? '—'}
             </span>
-            <span className="stat-sub">até {examDate}</span>
+            <span 
+              className="stat-sub" 
+              style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--accent)' }} 
+              onClick={() => { setExamDateInput(examDate); setIsEditingExamDate(true); }}
+              title="Editar data da prova"
+            >
+              até {examDate} ✏️
+            </span>
           </div>
+
+          <Modal 
+            isOpen={isEditingExamDate} 
+            onClose={() => setIsEditingExamDate(false)}
+            title="Configurar Data da Prova"
+            maxWidth="400px"
+            maxHeight="300px"
+          >
+            <form onSubmit={handleUpdateExamDate} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', padding: 'var(--space-5)' }}>
+              <label style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
+                Selecione a nova data limite do seu concurso:
+              </label>
+              <input 
+                type="date" 
+                value={examDateInput} 
+                onChange={e => setExamDateInput(e.target.value)}
+                style={{
+                  padding: 'var(--space-3)',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontSize: 16,
+                  fontFamily: 'inherit',
+                  width: '100%'
+                }}
+                autoFocus
+              />
+              <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-2)' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setIsEditingExamDate(false)}>Cancelar</button>
+                <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Salvar Data</button>
+              </div>
+            </form>
+          </Modal>
           <div className="stat-card">
             <span className="stat-label">✅ Dias Estudados</span>
             <span className="stat-value">

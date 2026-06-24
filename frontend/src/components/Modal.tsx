@@ -5,9 +5,11 @@ interface ModalProps {
   onClose: () => void;
   children: React.ReactNode;
   title?: string;
+  maxWidth?: string;
+  maxHeight?: string;
 }
 
-export default function Modal({ isOpen, onClose, children, title }: ModalProps) {
+export default function Modal({ isOpen, onClose, children, title, maxWidth = '95vw', maxHeight = '95vh' }: ModalProps) {
   // Fechar com tecla ESC
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -49,8 +51,10 @@ export default function Modal({ isOpen, onClose, children, title }: ModalProps) 
         style={{
           backgroundColor: 'var(--bg-elevated)',
           borderRadius: 'var(--radius-lg)',
-          width: '95vw',
-          height: '95vh',
+          width: '100%',
+          height: '100%',
+          maxWidth: maxWidth,
+          maxHeight: maxHeight,
           display: 'flex',
           flexDirection: 'column',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
