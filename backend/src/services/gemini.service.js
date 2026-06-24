@@ -55,10 +55,16 @@ O texto deve:
 3. Incluir exemplos práticos quando relevante
 4. Usar formatação com seções claras (use ## para subtítulos)
 5. Terminar com um resumo de 3 pontos-chave
-6. Para legislação: cite artigos e parágrafos específicos`;
+6. Para legislação: cite artigos e parágrafos específicos
+7. OBRIGATÓRIO: Adicione no final do conteúdo um mapa mental resumido usando a sintaxe Mermaid (bloco de código com a linguagem 'mermaid', usando diagramas do tipo flowchart, ex: 'graph TD' ou 'graph LR') para esquematizar de forma visual e intuitiva o assunto abordado e as relações com os pontos mais cobrados nas provas. Use caixas de texto com rótulos curtos e conexões diretas. Evite caracteres especiais incompatíveis com a sintaxe do Mermaid nos IDs dos nós (use letras e números e adicione o texto entre aspas se necessário, ex: no1["Texto do Nó"]).`;
 
-  const result = await model.generateContent(prompt);
-  return result.response.text();
+  try {
+    const result = await model.generateContent(prompt);
+    return result.response.text();
+  } catch (error) {
+    console.warn('[GEMINI API WARNING] Fallback to mock pre-reading:', error.message);
+    return generateMockPreReading(discipline, topic);
+  }
 }
 
 // Gerar questões estilo concurso
@@ -99,16 +105,21 @@ Responda APENAS com JSON válido no formato:
   ]
 }`;
 
-  const result = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: 'application/json',
-    },
-  });
+  try {
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+      },
+    });
 
-  const responseText = result.response.text();
-  const parsed = JSON.parse(responseText);
-  return parsed.questions || [];
+    const responseText = result.response.text();
+    const parsed = JSON.parse(responseText);
+    return parsed.questions || [];
+  } catch (error) {
+    console.warn('[GEMINI API WARNING] Fallback to mock questions:', error.message);
+    return generateMockQuestions(discipline, topic, count);
+  }
 }
 
 // Gerar explicação detalhada para erro
@@ -132,8 +143,13 @@ Forneça:
 3. Dica mnemônica ou regra fácil de lembrar
 4. Referência ao conteúdo/lei/artigo relevante`;
 
-  const result = await model.generateContent(prompt);
-  return result.response.text();
+  try {
+    const result = await model.generateContent(prompt);
+    return result.response.text();
+  } catch (error) {
+    console.warn('[GEMINI API WARNING] Fallback to mock error explanation:', error.message);
+    return `A resposta correta é ${correctAnswer}. ${question.explanation || 'Revise o conteúdo sobre ' + question.topic + '.'}`;
+  }
 }
 
 // Analisar provas enviadas
@@ -161,15 +177,20 @@ Retorne JSON com:
   "recommendations": ["recomendação 1", ...]
 }`;
 
-  const result = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: 'application/json',
-    },
-  });
+  try {
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+      },
+    });
 
-  const responseText = result.response.text();
-  return JSON.parse(responseText);
+    const responseText = result.response.text();
+    return JSON.parse(responseText);
+  } catch (error) {
+    console.warn('[GEMINI API WARNING] Fallback to mock exam analysis:', error.message);
+    return generateMockAnalysis();
+  }
 }
 
 // === MOCK FUNCTIONS (sem API key) ===
@@ -200,7 +221,28 @@ As questões de concurso frequentemente testam a capacidade de aplicar conceitos
 2. 📌 **Exceções e casos especiais** costumam ser o foco das questões mais difíceis
 3. 📌 **Terminologia técnica** deve ser dominada com precisão para evitar confusões nas alternativas
 
-> 💡 **Dica**: Configure sua Gemini API key nas configurações para conteúdo gerado especificamente para este tópico.`;
+> 💡 **Dica**: Configure sua Gemini API key nas configurações para conteúdo gerado especificamente para este tópico.
+
+\`\`\`mermaid
+graph TD
+    A["${topic}"] --> B["Fundamentos Legais"]
+    A --> C["Aplicação Prática"]
+    A --> D["Pontos Relevantes"]
+    
+    B --> B1["Legislação Nacional"]
+    B --> B2["Normas Técnicas"]
+    
+    C --> C1["Casos de Uso"]
+    C --> C2["Estudo de Provas"]
+    
+    D --> D1["Resumos Didáticos"]
+    D --> D2["Questões Resolvidas"]
+    
+    style A fill:#7b2cbf,stroke:#5a6b8c,stroke-width:2px,color:#fff
+    style B fill:#131924,stroke:#7b2cbf,color:#fff
+    style C fill:#131924,stroke:#7b2cbf,color:#fff
+    style D fill:#131924,stroke:#7b2cbf,color:#fff
+\`\`\``;
 }
 
 function generateMockQuestions(discipline, topic, count) {

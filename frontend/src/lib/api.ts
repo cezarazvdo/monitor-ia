@@ -1,0 +1,194 @@
+// frontend/src/lib/api.ts
+const API_BASE = '/api';
+
+async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    ...options,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ─── Gamification / Profile ──────────────────────────────────────────────────
+export const getProfile = () => fetchAPI<Profile>('/gamification/profile');
+export const updateProfile = (data: Partial<Profile>) =>
+  fetchAPI('/gamification/profile', { method: 'PUT', body: JSON.stringify(data) });
+export const getStats = () => fetchAPI<Stats>('/gamification/stats');
+export const getCalendar = (year: number, month: number) =>
+  fetchAPI<CalendarData>(`/gamification/calendar?year=${year}&month=${month}`);
+
+// ─── Sessions ────────────────────────────────────────────────────────────────
+export const startSession = (data: { discipline?: string; topic?: string }) =>
+  fetchAPI<{ sessionId: string; discipline: string; topic: string; date: string }>(
+    '/sessions/start', { method: 'POST', body: JSON.stringify(data) }
+  );
+
+export const completeSession = (sessionId: string, data: { xpEarned: number; durationSeconds: number }) =>
+  fetchAPI('/sessions/' + sessionId + '/complete', { method: 'POST', body: JSON.stringify(data) });
+
+export const submitAnswer = (sessionId: string, data: { questionId: string; selectedAnswer: string; timeTaken: number }) =>
+  fetchAPI<{ isCorrect: boolean; correctAnswer: string; explanation: string; xpGained: number }>(
+    '/sessions/' + sessionId + '/answer', { method: 'POST', body: JSON.stringify(data) }
+  );
+
+export const getTodaySession = () => fetchAPI<TodaySession>('/sessions/today');
+export const getWeakTopics = () => fetchAPI<WeakTopic[]>('/sessions/weak-topics');
+
+// ─── AI ──────────────────────────────────────────────────────────────────────
+export const generatePreReading = (data: { discipline: string; topic: string; subtopic?: string; sessionId?: string }) =>
+  fetchAPI<{ content: string }>('/ai/pre-reading', { method: 'POST', body: JSON.stringify(data) });
+
+export const generateQuestions = (data: { discipline: string; topic: string; content?: string; count?: number; sessionId?: string; difficulty?: number }) =>
+  fetchAPI<{ questions: Question[] }>('/ai/questions', { method: 'POST', body: JSON.stringify(data) });
+
+export const explainError = (data: { questionId: string; userAnswer: string; discipline?: string }) =>
+  fetchAPI<{ explanation: string }>('/ai/explain-error', { method: 'POST', body: JSON.stringify(data) });
+
+export const analyzeExams = () => fetchAPI('/ai/analyze-exams', { method: 'POST' });
+
+// ─── Documents ───────────────────────────────────────────────────────────────
+export const getDocuments = () => fetchAPI<Document[]>('/documents');
+export const deleteDocument = (id: string) => fetchAPI('/documents/' + id, { method: 'DELETE' });
+export const uploadDocument = async (file: File, type: string) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('type', type);
+  const res = await fetch(`${API_BASE}/documents/upload`, { method: 'POST', body: formData });
+  if (!res.ok) throw new Error('Upload falhou');
+  return res.json();
+};
+
+// ─── Search ──────────────────────────────────────────────────────────────────
+export const searchWeb = (q: string, type?: string) =>
+  fetchAPI<{ results: SearchResult[] }>(`/search?q=${encodeURIComponent(q)}${type ? '&type=' + type : ''}`);
+
+// ─── Health ──────────────────────────────────────────────────────────────────
+export const getHealth = () => fetchAPI<HealthCheck>('/health');
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+export interface Profile {
+  name: string;
+  xp: number;
+  level: number;
+  streak: number;
+  longestStreak: number;
+  lastStudyDate: string | null;
+  disciplineWeights: Record<string, number>;
+  examDate: string;
+  remainingWorkdays: number;
+  badges: Badge[];
+  xpToNextLevel: number;
+  levelProgress: number;
+}
+
+export interface Stats {
+  byDiscipline: DisciplineStat[];
+  dailyData: DailyLog[];
+  weakTopics: WeakTopic[];
+  todayAnswers: { total: number; correct: number };
+  totals: { sessions: number; studyHours: number };
+}
+
+export interface DisciplineStat {
+  discipline: string;
+  total: number;
+  correct: number;
+  rate: number;
+  avgTime: number;
+}
+
+export interface DailyLog {
+  date: string;
+  studied: number;
+  xp_earned: number;
+  questions_answered: number;
+  correct_answers: number;
+}
+
+export interface WeakTopic {
+  discipline: string;
+  topic: string;
+  error_count: number;
+  attempt_count: number;
+  error_rate: number;
+}
+
+export interface CalendarData {
+  year: number;
+  month: number;
+  days: CalendarDay[];
+  examDate: string;
+  remainingWorkdays: number;
+}
+
+export interface CalendarDay {
+  date: string;
+  dayOfMonth: number;
+  dayOfWeek: number;
+  isWorkday: boolean;
+  isHoliday: boolean;
+  isStudied: boolean;
+  isToday: boolean;
+}
+
+export interface TodaySession {
+  session: StudySession | null;
+  suggestedDiscipline: string;
+  suggestedTopic: string;
+  alreadyStudied: boolean;
+}
+
+export interface StudySession {
+  id: string;
+  date: string;
+  discipline: string;
+  topic: string;
+  phase: string;
+  status: string;
+}
+
+export interface Question {
+  id: string;
+  stem: string;
+  options: Record<string, string>;
+  correct: string;
+  correct_answer?: string;
+  explanation: string;
+  difficulty: number;
+}
+
+export interface Document {
+  id: string;
+  filename: string;
+  originalName: string;
+  type: string;
+  size: number;
+  status: 'done' | 'processing' | 'error';
+  uploadedAt: string;
+}
+
+export interface Badge {
+  id: string;
+  badge_key: string;
+  name: string;
+  description: string;
+  earned_at: string;
+}
+
+export interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+  source: string;
+}
+
+export interface HealthCheck {
+  status: string;
+  hasGemini: boolean;
+  hasSerper: boolean;
+  examDate: string;
+}
