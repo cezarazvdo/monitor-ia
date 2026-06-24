@@ -25,8 +25,28 @@ function isWeekday(date) {
   return day !== 0 && day !== 6; // 0 = domingo, 6 = sábado
 }
 
-function isWorkday(date) {
-  return isWeekday(date) && !isHoliday(date);
+function getCustomOverrides() {
+  try {
+    const { getDb } = require('../db/database');
+    const db = getDb();
+    const rows = db.prepare('SELECT date, is_workday FROM custom_calendar_days').all();
+    const overrides = {};
+    rows.forEach(row => {
+      overrides[row.date] = row.is_workday;
+    });
+    return overrides;
+  } catch (e) {
+    return {};
+  }
+}
+
+function isWorkday(date, overrides = null) {
+  const dateStr = date instanceof Date ? date.toISOString().split('T')[0] : date;
+  if (overrides && dateStr in overrides) {
+    return overrides[dateStr] === 1;
+  }
+  const d = date instanceof Date ? date : new Date(date);
+  return isWeekday(d) && !isHoliday(d);
 }
 
 function addDays(date, days) {
@@ -36,7 +56,10 @@ function addDays(date, days) {
 }
 
 // Contar dias úteis entre duas datas
-function countWorkdays(start, end) {
+function countWorkdays(start, end, overrides = null) {
+  if (!overrides) {
+    overrides = getCustomOverrides();
+  }
   let count = 0;
   let current = new Date(start);
   current.setHours(0, 0, 0, 0);
@@ -44,7 +67,7 @@ function countWorkdays(start, end) {
   endDate.setHours(0, 0, 0, 0);
 
   while (current <= endDate) {
-    if (isWorkday(current)) count++;
+    if (isWorkday(current, overrides)) count++;
     current = addDays(current, 1);
   }
   return count;
@@ -52,23 +75,25 @@ function countWorkdays(start, end) {
 
 // Dias úteis restantes até o concurso
 function getRemainingWorkdays(examDate) {
+  const overrides = getCustomOverrides();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const exam = new Date(examDate);
   exam.setHours(0, 0, 0, 0);
 
   if (today > exam) return 0;
-  return countWorkdays(today, exam);
+  return countWorkdays(today, exam, overrides);
 }
 
 // Próximos N dias úteis
 function getNextWorkdays(n, fromDate = new Date()) {
+  const overrides = getCustomOverrides();
   const days = [];
   let current = new Date(fromDate);
   current.setHours(0, 0, 0, 0);
 
   while (days.length < n) {
-    if (isWorkday(current)) {
+    if (isWorkday(current, overrides)) {
       days.push(new Date(current));
     }
     current = addDays(current, 1);
@@ -78,6 +103,7 @@ function getNextWorkdays(n, fromDate = new Date()) {
 
 // Gerar calendário do mês com marcação de dias úteis
 function getMonthCalendar(year, month, studiedDates = []) {
+  const overrides = getCustomOverrides();
   const firstDay = new Date(year, month - 1, 1);
   const lastDay = new Date(year, month, 0);
   const calendar = [];
@@ -89,7 +115,7 @@ function getMonthCalendar(year, month, studiedDates = []) {
       date: dateStr,
       dayOfMonth: current.getDate(),
       dayOfWeek: current.getDay(),
-      isWorkday: isWorkday(current),
+      isWorkday: isWorkday(current, overrides),
       isHoliday: isHoliday(current),
       isStudied: studiedDates.includes(dateStr),
       isToday: dateStr === new Date().toISOString().split('T')[0],

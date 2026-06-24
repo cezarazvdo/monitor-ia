@@ -164,4 +164,27 @@ router.get('/calendar', (req, res, next) => {
   }
 });
 
+// POST /api/gamification/calendar/toggle — alternar se um dia é dia de estudo ou não
+router.post('/calendar/toggle', (req, res, next) => {
+  try {
+    const { date, isWorkday } = req.body;
+    if (!date) {
+      return res.status(400).json({ error: 'Data é obrigatória' });
+    }
+
+    const db = getDb();
+    
+    // Insere ou atualiza a customização
+    db.prepare(`
+      INSERT INTO custom_calendar_days (date, is_workday)
+      VALUES (?, ?)
+      ON CONFLICT(date) DO UPDATE SET is_workday = excluded.is_workday
+    `).run(date, isWorkday ? 1 : 0);
+
+    res.json({ success: true, date, isWorkday });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

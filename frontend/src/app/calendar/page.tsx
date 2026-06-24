@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
-import { getCalendar, type CalendarData } from '../../lib/api';
+import { getCalendar, toggleCalendarDay, type CalendarData } from '../../lib/api';
 
 const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 const DAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -19,6 +19,18 @@ export default function CalendarPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [year, month]);
+
+  async function handleToggleDay(dateStr: string, currentIsWorkday: boolean) {
+    try {
+      const res = await toggleCalendarDay(dateStr, !currentIsWorkday);
+      if (res.success) {
+        const freshData = await getCalendar(year, month);
+        setData(freshData);
+      }
+    } catch (err) {
+      console.error('Erro ao alternar dia:', err);
+    }
+  }
 
   function prevMonth() {
     if (month === 1) { setMonth(12); setYear(y => y - 1); }
@@ -39,7 +51,7 @@ export default function CalendarPage() {
       <main className="main-content">
         <div className="page-header">
           <h1>📅 Calendário Inteligente</h1>
-          <p>Apenas dias úteis contam — feriados e fins de semana são excluídos automaticamente</p>
+          <p>Apenas dias úteis contam. <strong>Dica: clique em qualquer dia para alternar entre dia de estudo e descanso!</strong></p>
         </div>
 
         {/* Stats row */}
@@ -103,14 +115,20 @@ export default function CalendarPage() {
                 else cls += ' workday';
 
                 return (
-                  <div key={day.date} className={cls} title={
-                    isExam ? '🎯 DIA DO CONCURSO!'
-                    : day.isStudied ? '✅ Estudado'
-                    : day.isHoliday ? '🎉 Feriado'
-                    : day.isToday ? '📌 Hoje'
-                    : !day.isWorkday ? 'Fim de semana'
-                    : 'Dia útil'
-                  }>
+                  <div 
+                    key={day.date} 
+                    className={cls} 
+                    style={{ cursor: 'pointer', position: 'relative' }}
+                    onClick={() => handleToggleDay(day.date, day.isWorkday)}
+                    title={
+                      isExam ? '🎯 DIA DO CONCURSO!'
+                      : day.isStudied ? '✅ Estudado'
+                      : day.isHoliday ? '🎉 Feriado (clique para alternar)'
+                      : day.isToday ? '📌 Hoje (clique para alternar)'
+                      : !day.isWorkday ? 'Descanso/Fim de semana (clique para alternar)'
+                      : 'Dia útil (clique para alternar)'
+                    }
+                  >
                     {day.dayOfMonth}
                     {isExam && <div style={{ position: 'absolute', bottom: 2, left: '50%', transform: 'translateX(-50%)', width: 4, height: 4, borderRadius: '50%', background: 'var(--error)' }} />}
                     {day.isStudied && !isExam && <div style={{ position: 'absolute', bottom: 2, left: '50%', transform: 'translateX(-50%)', width: 4, height: 4, borderRadius: '50%', background: 'var(--success)' }} />}

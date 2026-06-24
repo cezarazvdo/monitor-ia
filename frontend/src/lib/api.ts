@@ -21,6 +21,12 @@ export const getStats = () => fetchAPI<Stats>('/gamification/stats');
 export const getCalendar = (year: number, month: number) =>
   fetchAPI<CalendarData>(`/gamification/calendar?year=${year}&month=${month}`);
 
+export const toggleCalendarDay = (date: string, isWorkday: boolean) =>
+  fetchAPI<{ success: boolean; date: string; isWorkday: boolean }>('/gamification/calendar/toggle', {
+    method: 'POST',
+    body: JSON.stringify({ date, isWorkday }),
+  });
+
 // ─── Sessions ────────────────────────────────────────────────────────────────
 export const startSession = (data: { discipline?: string; topic?: string }) =>
   fetchAPI<{ sessionId: string; discipline: string; topic: string; date: string }>(
@@ -40,7 +46,7 @@ export const getWeakTopics = () => fetchAPI<WeakTopic[]>('/sessions/weak-topics'
 
 // ─── AI ──────────────────────────────────────────────────────────────────────
 export const generatePreReading = (data: { discipline: string; topic: string; subtopic?: string; sessionId?: string }) =>
-  fetchAPI<{ content: string }>('/ai/pre-reading', { method: 'POST', body: JSON.stringify(data) });
+  fetchAPI<{ content: string; sources?: { name: string; type: string }[] }>('/ai/pre-reading', { method: 'POST', body: JSON.stringify(data) });
 
 export const generateQuestions = (data: { discipline: string; topic: string; content?: string; count?: number; sessionId?: string; difficulty?: number }) =>
   fetchAPI<{ questions: Question[] }>('/ai/questions', { method: 'POST', body: JSON.stringify(data) });
@@ -159,6 +165,7 @@ export interface Question {
   correct_answer?: string;
   explanation: string;
   difficulty: number;
+  source?: string;
 }
 
 export interface Document {

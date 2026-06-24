@@ -29,8 +29,8 @@ router.post('/pre-reading', async (req, res, next) => {
 
     // Buscar documentos relevantes
     const documents = db.prepare(
-      'SELECT text_content FROM documents WHERE processed = 1 ORDER BY uploaded_at DESC LIMIT 3'
-    ).all();
+      "SELECT id, original_name, text_content FROM documents WHERE processed = 1 ORDER BY uploaded_at DESC LIMIT 3"
+    ).all() || [];
 
     const content = await generatePreReading({ discipline, topic, subtopic, examPatterns, documents });
 
@@ -39,7 +39,13 @@ router.post('/pre-reading', async (req, res, next) => {
       db.prepare('UPDATE study_sessions SET phase = ? WHERE id = ?').run('pre_reading', sessionId);
     }
 
-    res.json({ content, discipline, topic, subtopic });
+    res.json({ 
+      content, 
+      discipline, 
+      topic, 
+      subtopic,
+      sources: documents.map(d => ({ name: d.original_name, type: 'document' }))
+    });
   } catch (err) {
     next(err);
   }
@@ -63,19 +69,27 @@ router.post('/questions', async (req, res, next) => {
       try { return JSON.parse(p.patterns || '[]'); } catch { return []; }
     });
 
+    // Buscar última prova processada para citar como fonte
+    const latestDoc = db.prepare(
+      "SELECT original_name FROM documents WHERE type = 'prova' AND processed = 1 ORDER BY uploaded_at DESC LIMIT 1"
+    ).get();
+    const defaultSource = latestDoc ? `ai:${latestDoc.original_name}` : 'ai';
+
     const questions = await generateQuestions({ discipline, topic, content, count, examPatterns, difficulty });
 
     // Salvar questões no banco
     const savedQuestions = questions.map(q => {
       const id = uuidv4();
+      const sourceVal = q.source || defaultSource;
       db.prepare(`
-        INSERT INTO questions (id, session_id, discipline, topic, stem, options, correct_answer, explanation, difficulty)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO questions (id, session_id, discipline, topic, stem, options, correct_answer, explanation, difficulty, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id, sessionId || null, discipline, topic,
-        q.stem, JSON.stringify(q.options), q.correct, q.explanation, q.difficulty || difficulty
+        q.stem, JSON.stringify(q.options), q.correct, q.explanation, q.difficulty || difficulty,
+        sourceVal
       );
-      return { ...q, id };
+      return { ...q, id, source: sourceVal };
     });
 
     res.json({ questions: savedQuestions, count: savedQuestions.length });

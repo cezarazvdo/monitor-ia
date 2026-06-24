@@ -281,6 +281,27 @@ export default function StatsPage() {
                   onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent)'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'; }}
                 >
+                  {(() => {
+                    let hostname = r.url;
+                    try { hostname = new URL(r.url).hostname; } catch {}
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 6 }}>
+                        <span style={{
+                          fontSize: 10,
+                          padding: '2px 6px',
+                          borderRadius: 'var(--radius-sm)',
+                          background: 'rgba(16,185,129,0.15)',
+                          color: 'var(--success)',
+                          fontWeight: 600,
+                        }}>
+                          📝 Cópia Literal (Busca)
+                        </span>
+                        <span style={{ fontSize: 11, color: 'var(--text-disabled)' }}>
+                          Fonte: {hostname}
+                        </span>
+                      </div>
+                    );
+                  })()}
                   <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--accent-hover)', marginBottom: 4 }}>{r.title}</div>
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{r.snippet}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-disabled)', marginTop: 4 }}>{r.url}</div>

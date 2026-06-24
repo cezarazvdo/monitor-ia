@@ -88,7 +88,7 @@ ${examPatterns?.length > 0 ? `Padrões das provas anteriores: ${examPatterns.joi
 REGRAS OBRIGATÓRIAS:
 - Cada questão tem exatamente 4 alternativas (A, B, C, D)
 - Uma única alternativa correta
-- Inclua gabarito comentado
+- Na propriedade "explanation", faça um gabarito comentado detalhado. Você DEVE explicar por que a resposta correta está certa E também detalhar o que está incorreto em CADA UMA das alternativas erradas (discordâncias com o texto/lei de referência).
 - Misture questões conceituais e aplicadas
 - Para legislação: inclua questões sobre artigos específicos
 

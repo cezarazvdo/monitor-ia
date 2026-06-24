@@ -33,6 +33,7 @@ export default function StudyPage() {
   const [topic, setTopic] = useState(TOPICS.legislacao[0]);
   const [session, setSession] = useState<StudySession | null>(null);
   const [preReadingContent, setPreReadingContent] = useState('');
+  const [preReadingSources, setPreReadingSources] = useState<{ name: string; type: string }[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentQ, setCurrentQ] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -67,6 +68,7 @@ export default function StudyPage() {
       });
       const pr = await generatePreReading({ discipline, topic, sessionId: s.sessionId });
       setPreReadingContent(pr.content);
+      setPreReadingSources(pr.sources || []);
       setPhase('pre_reading');
     } catch (e: any) {
       alert('Erro ao iniciar sessão: ' + e.message);
@@ -148,16 +150,37 @@ export default function StudyPage() {
     }
   }
 
+  const [correctionLoading, setCorrectionLoading] = useState<Record<string, boolean>>({});
+
   // Get detailed AI explanation for wrong answer
-  async function handleGetExplanation(q: Question, userAnswer: string) {
-    setLoadingExplain(true);
+  async function handleGetExplanation(q: Question, userAnswer: string, isActiveCorrection = false) {
+    if (isActiveCorrection) {
+      setCorrectionLoading(p => ({ ...p, [q.id]: true }));
+    } else {
+      setLoadingExplain(true);
+    }
+    
     try {
       const res = await explainError({ questionId: q.id, userAnswer, discipline });
-      setDetailedExplanation(res.explanation);
+      
+      if (!isActiveCorrection) {
+        setDetailedExplanation(res.explanation);
+      }
+      
+      // Sempre salvar na lista de erros para uso posterior
+      setWrongAnswers(prev => prev.map(wa => 
+        wa.question.id === q.id ? { ...wa, explanation: res.explanation } : wa
+      ));
     } catch {
-      setDetailedExplanation(q.explanation || 'Revise o conteúdo sobre este tópico.');
+      if (!isActiveCorrection) {
+        setDetailedExplanation(q.explanation || 'Revise o conteúdo sobre este tópico.');
+      }
     } finally {
-      setLoadingExplain(false);
+      if (isActiveCorrection) {
+        setCorrectionLoading(p => ({ ...p, [q.id]: false }));
+      } else {
+        setLoadingExplain(false);
+      }
     }
   }
 
@@ -269,13 +292,31 @@ export default function StudyPage() {
             </div>
 
             <div className="card-accent" style={{ marginBottom: 'var(--space-6)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginBottom: 'var(--space-2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-3)', marginBottom: 'var(--space-2)' }}>
                 <span className={`discipline-badge discipline-${discipline}`}>
                   {DISCIPLINES.find(d => d.key === discipline)?.emoji} {DISCIPLINES.find(d => d.key === discipline)?.label}
                 </span>
                 <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>📖 ~5 min de leitura</span>
+                <span style={{
+                  fontSize: 11,
+                  padding: '2px 8px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'rgba(99,102,241,0.15)',
+                  color: 'var(--accent)',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4
+                }}>
+                  🤖 Conteúdo Sintetizado por IA
+                </span>
               </div>
               <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 'var(--space-1)' }}>{topic}</h2>
+              {preReadingSources.length > 0 && (
+                <div style={{ marginTop: 'var(--space-3)', fontSize: 12, color: 'var(--text-secondary)' }}>
+                  📚 <strong>Fontes utilizadas:</strong> {preReadingSources.map(s => s.name).join(', ')}
+                </div>
+              )}
             </div>
 
             <div className="card" ref={contentRef} style={{ marginBottom: 'var(--space-6)', lineHeight: 1.8 }}>
@@ -347,10 +388,65 @@ export default function StudyPage() {
 
             {/* Question card */}
             <div className="card-accent" style={{ marginBottom: 'var(--space-5)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
                 <span className={`discipline-badge discipline-${discipline}`}>
                   {DISCIPLINES.find(d => d.key === discipline)?.emoji} {topic}
                 </span>
+                
+                {/* AI vs Copy badge & citation */}
+                {(() => {
+                  const src = q.source || 'ai';
+                  if (src.startsWith('copy:')) {
+                    return (
+                      <span style={{
+                        fontSize: 11,
+                        padding: '2px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'rgba(16,185,129,0.15)',
+                        color: 'var(--success)',
+                        fontWeight: 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }} title="Questão oficial copiada de prova anterior">
+                        📝 Questão Oficial · <span style={{ textDecoration: 'underline' }}>{src.slice(5)}</span>
+                      </span>
+                    );
+                  } else if (src.startsWith('ai:')) {
+                    return (
+                      <span style={{
+                        fontSize: 11,
+                        padding: '2px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'rgba(99,102,241,0.15)',
+                        color: 'var(--accent)',
+                        fontWeight: 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }} title="Questão gerada por IA a partir de documento de prova/edital">
+                        🤖 IA · <span style={{ textDecoration: 'underline' }}>Baseado em: {src.slice(3)}</span>
+                      </span>
+                    );
+                  } else {
+                    return (
+                      <span style={{
+                        fontSize: 11,
+                        padding: '2px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'rgba(99,102,241,0.15)',
+                        color: 'var(--accent)',
+                        fontWeight: 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }} title="Questão elaborada por inteligência artificial">
+                        🤖 Elaborada por IA
+                      </span>
+                    );
+                  }
+                })()}
+
                 <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-tertiary)' }}>
                   {'⭐'.repeat(q.difficulty || 2)}
                 </span>
@@ -450,23 +546,78 @@ export default function StudyPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
               {wrongAnswers.map((wa, i) => (
                 <div key={i} className="card" style={{ borderLeft: '3px solid var(--error)' }}>
-                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 'var(--space-3)' }}>
-                    Questão {i + 1} de {wrongAnswers.length}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                      Questão {i + 1} de {wrongAnswers.length}
+                    </span>
+                    
+                    {(() => {
+                      const src = wa.question.source || 'ai';
+                      if (src.startsWith('copy:')) {
+                        return (
+                          <span style={{
+                            fontSize: 10,
+                            padding: '1px 6px',
+                            borderRadius: 'var(--radius-sm)',
+                            background: 'rgba(16,185,129,0.15)',
+                            color: 'var(--success)',
+                            fontWeight: 600,
+                          }}>
+                            📝 Oficial ({src.slice(5)})
+                          </span>
+                        );
+                      } else if (src.startsWith('ai:')) {
+                        return (
+                          <span style={{
+                            fontSize: 10,
+                            padding: '1px 6px',
+                            borderRadius: 'var(--radius-sm)',
+                            background: 'rgba(99,102,241,0.15)',
+                            color: 'var(--accent)',
+                            fontWeight: 600,
+                          }}>
+                            🤖 IA ({src.slice(3)})
+                          </span>
+                        );
+                      } else {
+                        return (
+                          <span style={{
+                            fontSize: 10,
+                            padding: '1px 6px',
+                            borderRadius: 'var(--radius-sm)',
+                            background: 'rgba(99,102,241,0.15)',
+                            color: 'var(--accent)',
+                            fontWeight: 600,
+                          }}>
+                            🤖 IA
+                          </span>
+                        );
+                      }
+                    })()}
                   </div>
                   <p style={{ fontSize: 15, lineHeight: 1.7, marginBottom: 'var(--space-4)', fontWeight: 500 }}>
                     {wa.question.stem}
                   </p>
-                  <div style={{ display: 'flex', gap: 'var(--space-3)', fontSize: 13, marginBottom: 'var(--space-4)' }}>
-                    <span style={{ background: 'var(--error-dim)', color: 'var(--error)', padding: '4px 10px', borderRadius: 'var(--radius-full)', fontWeight: 600 }}>
-                      Sua resposta: {wa.userAnswer}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 13, marginBottom: 'var(--space-4)' }}>
+                    <span style={{ background: 'var(--error-dim)', color: 'var(--error)', padding: '6px 12px', borderRadius: 'var(--radius)', fontWeight: 600, alignSelf: 'flex-start', lineHeight: 1.5 }}>
+                      ❌ Sua resposta: {wa.userAnswer} - {wa.question.options?.[wa.userAnswer]}
                     </span>
-                    <span style={{ background: 'var(--success-dim)', color: 'var(--success)', padding: '4px 10px', borderRadius: 'var(--radius-full)', fontWeight: 600 }}>
-                      Correta: {wa.question.correct || wa.question.correct_answer}
+                    <span style={{ background: 'var(--success-dim)', color: 'var(--success)', padding: '6px 12px', borderRadius: 'var(--radius)', fontWeight: 600, alignSelf: 'flex-start', lineHeight: 1.5 }}>
+                      ✅ Correta: {wa.question.correct || wa.question.correct_answer} - {wa.question.options?.[wa.question.correct || wa.question.correct_answer]}
                     </span>
                   </div>
                   <div className="explanation-box">
                     <strong style={{ color: 'var(--text-primary)' }}>💡 Por quê?</strong>
-                    <p style={{ marginTop: 6 }}>{wa.explanation || 'Revise o conteúdo sobre este tópico.'}</p>
+                    <p style={{ marginTop: 6, whiteSpace: 'pre-line' }}>{wa.explanation || 'Revise o conteúdo sobre este tópico.'}</p>
+                    
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ marginTop: 'var(--space-3)' }}
+                      onClick={() => handleGetExplanation(wa.question, wa.userAnswer, true)}
+                      disabled={correctionLoading[wa.question.id]}
+                    >
+                      {correctionLoading[wa.question.id] ? '⏳ Analisando erro...' : '🤖 Aprofundar explicação do erro com IA'}
+                    </button>
                   </div>
                 </div>
               ))}

@@ -138,6 +138,12 @@ function initDatabase() {
       patterns TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- Customização de dias de estudo no calendário
+    CREATE TABLE IF NOT EXISTS custom_calendar_days (
+      date TEXT PRIMARY KEY,
+      is_workday INTEGER NOT NULL
+    );
   `);
 
   console.log('[DB] Banco de dados inicializado com sucesso');
