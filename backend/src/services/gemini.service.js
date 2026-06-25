@@ -1,4 +1,5 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { searchSerper } = require('./search.service');
 
 let client = null;
 
@@ -34,6 +35,9 @@ async function generatePreReading({ discipline, topic, subtopic, examPatterns, d
     return generateMockPreReading(discipline, topic);
   }
 
+  // Buscar na web via Serper para enriquecer o contexto
+  const searchResults = await searchSerper(`${topic} ${subtopic || ''} concurso público`, 3).catch(() => []);
+
   const contextParts = [];
   if (examPatterns && examPatterns.length > 0) {
     contextParts.push(`Padrões identificados nas provas: ${examPatterns.join('; ')}`);
@@ -41,6 +45,10 @@ async function generatePreReading({ discipline, topic, subtopic, examPatterns, d
   if (documents && documents.length > 0) {
     const docContext = documents.slice(0, 2).map(d => d.text_content?.slice(0, 1000)).filter(Boolean).join('\n\n');
     if (docContext) contextParts.push(`Contexto dos documentos:\n${docContext}`);
+  }
+  if (searchResults && searchResults.length > 0) {
+    const searchContext = searchResults.map(r => `Título: ${r.title}\nTrecho: ${r.snippet}\nLink: ${r.url}`).join('\n\n');
+    if (searchContext) contextParts.push(`Resultados da busca web (Serper):\n${searchContext}`);
   }
 
   const prompt = `Gere um texto de pré-leitura (máximo 5 minutos de leitura, ~600 palavras) sobre:
@@ -56,14 +64,19 @@ O texto deve:
 4. Usar formatação com seções claras (use ## para subtítulos)
 5. Terminar com um resumo de 3 pontos-chave
 6. Para legislação: cite artigos e parágrafos específicos
-7. OBRIGATÓRIO: Adicione no final do conteúdo um mapa mental resumido usando a sintaxe Mermaid (bloco de código com a linguagem 'mermaid', usando diagramas do tipo flowchart, ex: 'graph TD' ou 'graph LR') para esquematizar de forma visual e intuitiva o assunto abordado e as relações com os pontos mais cobrados nas provas. Use caixas de texto com rótulos curtos e conexões diretas. Evite caracteres especiais incompatíveis com a sintaxe do Mermaid nos IDs dos nós (use letras e números e adicione o texto entre aspas se necessário, ex: no1["Texto do Nó"]).`;
+7. OBRIGATÓRIO (IDENTIFICAÇÃO DE FONTES): No início de cada parágrafo, seção ou ponto chave do texto teórico, adicione uma das seguintes flags/tags em negrito de acordo com a origem real daquela informação:
+   - **[IA]**: para conceitos baseados no seu próprio conhecimento geral.
+   - **[Documento]**: para fatos tirados diretamente da seção "Contexto dos documentos".
+   - **[Busca]**: para dados ou detalhes vindos da seção "Resultados da busca web (Serper)".
+   Você DEVE iniciar o conteúdo com uma linha destacada em itálico e negrito explicando a legenda das flags (ex: "*Origem das informações: [IA] Inteligência Artificial | [Documento] Documentos Enviados | [Busca] Busca Web*").
+8. OBRIGATÓRIO (MAPA MENTAL): Adicione no final do conteúdo um mapa mental resumido usando a sintaxe Mermaid (bloco de código com a linguagem 'mermaid', usando diagramas do tipo flowchart, ex: 'graph TD' ou 'graph LR') para esquematizar de forma visual e intuitiva o assunto abordado e as relações com os pontos mais cobrados nas provas. Use caixas de texto com rótulos curtos e conexões diretas. Evite caracteres especiais incompatíveis com a sintaxe do Mermaid nos IDs dos nós (use letras e números e adicione o texto entre aspas se necessário, ex: no1["Texto do Nó"]).`;
 
   try {
     const result = await model.generateContent(prompt);
-    return result.response.text();
+    return { content: result.response.text() };
   } catch (error) {
     console.warn('[GEMINI API WARNING] Fallback to mock pre-reading:', error.message);
-    return generateMockPreReading(discipline, topic);
+    return { content: generateMockPreReading(discipline, topic), apiWarning: error.message };
   }
 }
 
@@ -112,13 +125,13 @@ Responda APENAS com JSON válido no formato:
         responseMimeType: 'application/json',
       },
     });
-
-    const responseText = result.response.text();
-    const parsed = JSON.parse(responseText);
-    return parsed.questions || [];
+    const text = result.response.text();
+    const cleanJson = text.replace(/```json/g, '').replace(/```/g, '');
+    const parsed = JSON.parse(cleanJson).questions;
+    return { questions: parsed };
   } catch (error) {
     console.warn('[GEMINI API WARNING] Fallback to mock questions:', error.message);
-    return generateMockQuestions(discipline, topic, count);
+    return { questions: generateMockQuestions(discipline, topic, count), apiWarning: error.message };
   }
 }
 
@@ -196,30 +209,33 @@ Retorne JSON com:
 // === MOCK FUNCTIONS (sem API key) ===
 
 function generateMockPreReading(discipline, topic) {
-  return `## ${topic} — Resumo para Estudo
+  return `***Legenda de Fontes: [IA] Inteligência Artificial | [Documento] Documentos Enviados | [Busca] Busca Web***
 
-### Conceitos Fundamentais
+## **[IA]** ${topic} — Resumo para Estudo
+
+### **[IA]** Conceitos Fundamentais
 
 Este é um conteúdo de demonstração gerado sem API key. Configure sua chave Gemini em **Configurações** para conteúdo personalizado.
 
 ### Pontos Principais
 
-**1. Base teórica**
+**1. [IA] Base teórica**
 O estudo de ${topic} no contexto de ${discipline} exige compreensão dos fundamentos estabelecidos pela legislação e normas técnicas brasileiras.
 
-**2. Aplicação prática**
-As questões de concurso frequentemente testam a capacidade de aplicar conceitos teóricos em situações práticas do cotidiano profissional.
+**2. [Documento] Aplicação prática**
+As questões de concurso frequentemente testam a capacidade de aplicar conceitos teóricos em situações práticas extraídas das provas e editais anexados.
 
-**3. Legislação relevante**
+**3. [Busca] Legislação relevante**
+De acordo com buscas em portais legislativos confiáveis:
 - Lei nº 13.709/2018 (LGPD)
 - ISO/IEC 27001 e 27002
 - Marco Civil da Internet (Lei 12.965/2014)
 
 ### Resumo — 3 Pontos-Chave
 
-1. 📌 **Fundamentos legais** são sempre cobrados — memorize artigos e incisos específicos
-2. 📌 **Exceções e casos especiais** costumam ser o foco das questões mais difíceis
-3. 📌 **Terminologia técnica** deve ser dominada com precisão para evitar confusões nas alternativas
+1. 📌 **[IA] Fundamentos legais** são sempre cobrados — memorize artigos e incisos específicos.
+2. 📌 **[Documento] Exceções e casos especiais** baseados nos editais costumam ser o foco das questões.
+3. 📌 **[Busca] Terminologia técnica** oficial deve ser dominada com precisão para evitar pegadinhas.
 
 > 💡 **Dica**: Configure sua Gemini API key nas configurações para conteúdo gerado especificamente para este tópico.
 
@@ -278,9 +294,43 @@ function generateMockAnalysis() {
   };
 }
 
+async function fixMermaidDiagram(brokenChart) {
+  const model = getModel();
+
+  if (!model) {
+    return { content: brokenChart };
+  }
+
+  const prompt = `Você recebeu um código de diagrama do Mermaid (sintaxe flowchart do tipo graph TD ou graph LR) que está gerando erros de renderização gráfica devido a problemas de sintaxe.
+Seu papel é corrigir e retornar APENAS o código Mermaid válido e corrigido, sem qualquer formatação markdown adicional, blocos de código (como \`\`\`mermaid) ou textos explicativos.
+
+Aqui está o código do diagrama com erro:
+${brokenChart}
+
+Instruções importantes para a correção:
+1. Certifique-se de que a sintaxe básica esteja correta. Por exemplo: "graph TD" ou "graph LR".
+2. Certifique-se de que os IDs dos nós contenham apenas caracteres alfanuméricos e sublinhados/hifens. Exemplo correto: no1["Texto do Nó"]. Evite usar caracteres especiais, acentos ou símbolos nos IDs.
+3. Certifique-se de fechar todos os delimitadores de nós corretamente, por exemplo, colchetes [], parênteses () ou chaves {}.
+4. Evite usar aspas aninhadas de forma incorreta. Rótulos de nós com aspas devem ser formatados como no1["Texto com aspas"].
+5. Certifique-se de que as conexões (setas) usem a sintaxe correta, por exemplo: "-->" ou "---" ou "==>". Não use setas com formatos inválidos.
+6. Retorne APENAS o código do diagrama Mermaid corrigido e limpo.`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    let content = result.response.text();
+    // Limpar possíveis blocos de código markdown que o modelo insista em retornar
+    content = content.replace(/```mermaid/g, '').replace(/```/g, '').trim();
+    return { content };
+  } catch (error) {
+    console.error('[GEMINI API ERROR] Falha ao corrigir diagrama Mermaid:', error.message);
+    return { content: brokenChart, error: error.message };
+  }
+}
+
 module.exports = {
   generatePreReading,
   generateQuestions,
   generateErrorExplanation,
   analyzeExamPapers,
+  fixMermaidDiagram,
 };

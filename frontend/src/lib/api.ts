@@ -46,15 +46,18 @@ export const getWeakTopics = () => fetchAPI<WeakTopic[]>('/sessions/weak-topics'
 
 // ─── AI ──────────────────────────────────────────────────────────────────────
 export const generatePreReading = (data: { discipline: string; topic: string; subtopic?: string; sessionId?: string }) =>
-  fetchAPI<{ content: string; sources?: { name: string; type: string }[] }>('/ai/pre-reading', { method: 'POST', body: JSON.stringify(data) });
+  fetchAPI<{ content: string; apiWarning?: string; sources?: { name: string; type: string }[] }>('/ai/pre-reading', { method: 'POST', body: JSON.stringify(data) });
 
 export const generateQuestions = (data: { discipline: string; topic: string; content?: string; count?: number; sessionId?: string; difficulty?: number }) =>
-  fetchAPI<{ questions: Question[] }>('/ai/questions', { method: 'POST', body: JSON.stringify(data) });
+  fetchAPI<{ questions: Question[]; apiWarning?: string }>('/ai/questions', { method: 'POST', body: JSON.stringify(data) });
 
 export const explainError = (data: { questionId: string; userAnswer: string; discipline?: string }) =>
   fetchAPI<{ explanation: string }>('/ai/explain-error', { method: 'POST', body: JSON.stringify(data) });
 
 export const analyzeExams = () => fetchAPI('/ai/analyze-exams', { method: 'POST' });
+
+export const fixMermaid = (data: { chart: string }) =>
+  fetchAPI<{ content: string; error?: string }>('/ai/fix-mermaid', { method: 'POST', body: JSON.stringify(data) });
 
 // ─── Documents ───────────────────────────────────────────────────────────────
 export const getDocuments = () => fetchAPI<Document[]>('/documents');

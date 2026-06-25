@@ -7,6 +7,7 @@ const {
   generateQuestions,
   generateErrorExplanation,
   analyzeExamPapers,
+  fixMermaidDiagram,
 } = require('../services/gemini.service');
 
 // POST /api/ai/pre-reading — gerar conteúdo de pré-leitura
@@ -32,7 +33,7 @@ router.post('/pre-reading', async (req, res, next) => {
       "SELECT id, original_name, text_content FROM documents WHERE processed = 1 ORDER BY uploaded_at DESC LIMIT 3"
     ).all() || [];
 
-    const content = await generatePreReading({ discipline, topic, subtopic, examPatterns, documents });
+    const result = await generatePreReading({ discipline, topic, subtopic, examPatterns, documents });
 
     // Atualizar sessão se fornecida
     if (sessionId) {
@@ -40,7 +41,8 @@ router.post('/pre-reading', async (req, res, next) => {
     }
 
     res.json({ 
-      content, 
+      content: result.content, 
+      apiWarning: result.apiWarning,
       discipline, 
       topic, 
       subtopic,
@@ -75,10 +77,10 @@ router.post('/questions', async (req, res, next) => {
     ).get();
     const defaultSource = latestDoc ? `ai:${latestDoc.original_name}` : 'ai';
 
-    const questions = await generateQuestions({ discipline, topic, content, count, examPatterns, difficulty });
+    const result = await generateQuestions({ discipline, topic, content, count, examPatterns, difficulty });
 
     // Salvar questões no banco
-    const savedQuestions = questions.map(q => {
+    const savedQuestions = result.questions.map(q => {
       const id = uuidv4();
       const sourceVal = q.source || defaultSource;
       db.prepare(`
@@ -92,7 +94,7 @@ router.post('/questions', async (req, res, next) => {
       return { ...q, id, source: sourceVal };
     });
 
-    res.json({ questions: savedQuestions, count: savedQuestions.length });
+    res.json({ questions: savedQuestions, count: savedQuestions.length, apiWarning: result.apiWarning });
   } catch (err) {
     next(err);
   }
@@ -148,6 +150,20 @@ router.post('/analyze-exams', async (req, res, next) => {
     }
 
     res.json(analysis);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ai/fix-mermaid — corrigir código Mermaid quebrado
+router.post('/fix-mermaid', async (req, res, next) => {
+  try {
+    const { chart } = req.body;
+    if (!chart) {
+      return res.status(400).json({ error: 'O parâmetro chart é obrigatório' });
+    }
+    const result = await fixMermaidDiagram(chart);
+    res.json(result);
   } catch (err) {
     next(err);
   }

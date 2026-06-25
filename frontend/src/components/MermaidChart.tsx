@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import mermaid from 'mermaid';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import Modal from './Modal';
+import { fixMermaid } from '../lib/api';
 
 // Configurar o tema Mermaid
 mermaid.initialize({
@@ -37,9 +38,12 @@ interface MermaidChartProps {
 }
 
 export default function MermaidChart({ chart }: MermaidChartProps) {
+  const [currentChart, setCurrentChart] = useState<string>(chart);
   const [svgHtml, setSvgHtml] = useState<string>('');
   const [error, setError] = useState<boolean>(false);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [isCorrecting, setIsCorrecting] = useState<boolean>(false);
+  const [correctionError, setCorrectionError] = useState<string>('');
   const chartIdRef = useRef<string>(`mermaid-${Math.floor(Math.random() * 1000000)}`);
 
   // Sanitizar a sintaxe do Mermaid
@@ -103,7 +107,14 @@ export default function MermaidChart({ chart }: MermaidChartProps) {
     return clean;
   };
 
-  const cleanChart = sanitizeMermaid(chart);
+  const cleanChart = sanitizeMermaid(currentChart);
+
+  // Reiniciar estado se a prop chart mudar
+  useEffect(() => {
+    setCurrentChart(chart);
+    setError(false);
+    setCorrectionError('');
+  }, [chart]);
 
   useEffect(() => {
     let isMounted = true;
@@ -131,21 +142,120 @@ export default function MermaidChart({ chart }: MermaidChartProps) {
     };
   }, [cleanChart]);
 
+  const handleReload = () => {
+    setError(false);
+    setCorrectionError('');
+    chartIdRef.current = `mermaid-${Math.floor(Math.random() * 1000000)}`;
+    setCurrentChart(prev => prev + ' '); // Força atualização do estado para disparar render
+  };
+
+  const handleFixWithAI = async () => {
+    setIsCorrecting(true);
+    setCorrectionError('');
+    try {
+      const res = await fixMermaid({ chart: currentChart });
+      if (res.error) {
+        setCorrectionError(res.error);
+      } else if (res.content) {
+        chartIdRef.current = `mermaid-${Math.floor(Math.random() * 1000000)}`;
+        setCurrentChart(res.content);
+        setError(false);
+      }
+    } catch (err: any) {
+      setCorrectionError(err.message || 'Erro ao conectar ao servidor para corrigir o diagrama.');
+    } finally {
+      setIsCorrecting(false);
+    }
+  };
+
   if (error) {
     return (
       <div 
         style={{
           margin: 'var(--space-6) 0',
-          padding: 'var(--space-4) var(--space-5)',
-          background: 'var(--error-dim)',
-          borderRadius: 'var(--radius)',
-          border: '1px solid var(--error)',
-          fontSize: 13,
-          color: 'var(--error)',
-          lineHeight: 1.6
+          padding: 'var(--space-6)',
+          background: 'var(--bg-elevated)',
+          borderRadius: 'var(--radius-lg)',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-4)',
+          position: 'relative',
+          overflow: 'hidden'
         }}
       >
-        ⚠️ **Erro de visualização no mapa mental**: O diagrama continha inconsistências de sintaxe e não pôde ser renderizado graficamente.
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: '3px',
+          background: 'var(--error)'
+        }} />
+        
+        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+          <span style={{ fontSize: '20px', lineHeight: '1' }}>⚠️</span>
+          <div>
+            <h4 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+              Erro de visualização no mapa mental
+            </h4>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              O diagrama gerado contém inconsistências de sintaxe e não pôde ser renderizado graficamente.
+            </p>
+          </div>
+        </div>
+
+        {correctionError && (
+          <div style={{ 
+            fontSize: '12px', 
+            color: 'var(--error)', 
+            background: 'var(--error-dim)', 
+            padding: 'var(--space-2) var(--space-3)', 
+            borderRadius: 'var(--radius-sm)',
+            border: '1px solid rgba(239, 68, 68, 0.15)'
+          }}>
+            ❌ {correctionError}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', marginTop: 'var(--space-1)' }}>
+          <button 
+            className="btn btn-primary btn-sm" 
+            onClick={handleFixWithAI}
+            disabled={isCorrecting}
+            style={{
+              background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              boxShadow: '0 4px 12px var(--accent-glow)'
+            }}
+          >
+            {isCorrecting ? (
+              <>
+                <div className="spinner" style={{ width: '12px', height: '12px', borderWidth: '1.5px' }} />
+                <span>Corrigindo com IA...</span>
+              </>
+            ) : (
+              <>
+                <span>✨ Corrigir com IA</span>
+              </>
+            )}
+          </button>
+
+          <button 
+            className="btn btn-secondary btn-sm" 
+            onClick={handleReload}
+            disabled={isCorrecting}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)'
+            }}
+          >
+            <span>🔄 Recarregar</span>
+          </button>
+        </div>
       </div>
     );
   }

@@ -39,6 +39,7 @@ export default function StudyPage() {
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [answerResult, setAnswerResult] = useState<{ isCorrect: boolean; correctAnswer: string; explanation: string } | null>(null);
   const [wrongAnswers, setWrongAnswers] = useState<{ question: Question; userAnswer: string; explanation: string }[]>([]);
+  const [apiWarning, setApiWarning] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [xpEarned, setXpEarned] = useState(0);
   const [sessionXP, setSessionXP] = useState(0);
@@ -69,6 +70,8 @@ export default function StudyPage() {
       const pr = await generatePreReading({ discipline, topic, sessionId: s.sessionId });
       setPreReadingContent(pr.content);
       setPreReadingSources(pr.sources || []);
+      if (pr.apiWarning) setApiWarning(pr.apiWarning);
+      else setApiWarning(null);
       setPhase('pre_reading');
     } catch (e: any) {
       alert('Erro ao iniciar sessão: ' + e.message);
@@ -90,6 +93,7 @@ export default function StudyPage() {
         difficulty: 2,
       });
       setQuestions(result.questions);
+      if (result.apiWarning) setApiWarning(result.apiWarning);
       setCurrentQ(0);
       setPhase('quiz');
       setQStartTime(Date.now());
@@ -201,6 +205,35 @@ export default function StudyPage() {
     <div className="layout">
       <Sidebar />
       <main className="main-content">
+
+        {apiWarning && (
+          <div style={{
+            background: 'var(--error-dim)',
+            color: 'var(--error)',
+            padding: 'var(--space-3) var(--space-4)',
+            borderRadius: 'var(--radius)',
+            marginBottom: 'var(--space-4)',
+            fontSize: 14,
+            fontWeight: 500,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-3)',
+            maxWidth: 800,
+            margin: '0 auto var(--space-6) auto'
+          }}>
+            <span style={{ fontSize: 20 }}>⚠️</span>
+            <span>
+              <strong>Aviso da IA:</strong> Não foi possível acessar o modelo (Tokens esgotados ou alta demanda). O sistema carregou conteúdo de demonstração local para você não interromper os estudos. 
+              <br/><span style={{ opacity: 0.8, fontSize: 12 }}>Detalhes: {apiWarning}</span>
+            </span>
+            <button 
+              onClick={() => setApiWarning(null)}
+              style={{ background: 'transparent', border: 'none', color: 'var(--error)', cursor: 'pointer', marginLeft: 'auto', padding: 4 }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* PHASE: SETUP */}
         {phase === 'setup' && (
