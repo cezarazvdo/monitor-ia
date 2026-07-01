@@ -1,7 +1,15 @@
 const fetch = require('node-fetch');
 const cheerio = require('cheerio');
+const SerperSearchProvider = require('./providers/search/SerperSearchProvider');
+const TavilySearchProvider = require('./providers/search/TavilySearchProvider');
+const CheerioExtractor = require('./providers/extractor/CheerioExtractor');
 
-// Busca via Serper API (Google Search)
+// Instâncias singleton dos providers
+const serperProvider = new SerperSearchProvider();
+const tavilyProvider = new TavilySearchProvider();
+const contentExtractor = new CheerioExtractor();
+
+// Busca via Serper API (Google Search) — mantida para compatibilidade retroativa
 async function searchSerper(query, numResults = 5) {
   if (!process.env.SERPER_API_KEY) {
     return searchFallback(query);
@@ -32,11 +40,10 @@ async function searchSerper(query, numResults = 5) {
   }
 }
 
-// Busca por legislação específica (fontes confiáveis)
+// Busca por legislação específica (fontes confiáveis) — mantida para compatibilidade
 async function searchLegislation(topic) {
   const sources = [];
 
-  // Planalto.gov.br para leis
   const legalQueries = [
     `site:planalto.gov.br ${topic}`,
     `site:lexml.gov.br ${topic}`,
@@ -51,7 +58,7 @@ async function searchLegislation(topic) {
   return sources.slice(0, 8);
 }
 
-// Scraping de conteúdo de uma URL
+// Scraping de conteúdo de uma URL — mantida para compatibilidade retroativa
 async function scrapeContent(url) {
   try {
     const response = await fetch(url, {
@@ -64,7 +71,6 @@ async function scrapeContent(url) {
     const html = await response.text();
     const $ = cheerio.load(html);
 
-    // Remove scripts, styles, nav, footer
     $('script, style, nav, footer, header, aside, .menu, .nav, .sidebar').remove();
 
     const text = $('article, main, .content, .post-content, body')
@@ -78,6 +84,60 @@ async function scrapeContent(url) {
   } catch (err) {
     return { url, text: '', success: false, error: err.message };
   }
+}
+
+/**
+ * ragEnrichContext — Camada RAG: busca e extrai conteúdo de múltiplos providers
+ * para enriquecer o contexto enviado ao pipeline de geração de pré-leitura.
+ *
+ * @param {object} params
+ * @param {string} params.topic - Tópico principal
+ * @param {string} [params.subtopic] - Subtópico opcional
+ * @param {string} [params.discipline] - Disciplina (ex: 'legislacao')
+ * @param {string} [params.banca] - Banca do concurso (ex: 'CESPE')
+ * @param {number} [params.maxResults=4] - Máximo de resultados por provider
+ * @param {boolean} [params.extractContent=false] - Se deve extrair conteúdo das páginas
+ * @returns {Promise<Array<{title, url, snippet, content, source, queriedAt}>>}
+ */
+async function ragEnrichContext({ topic, subtopic = '', discipline = '', banca = '', maxResults = 4, extractContent = false }) {
+  const queriedAt = new Date().toISOString();
+  const query = `${topic} ${subtopic} concurso público`.replace(/\s+/g, ' ').trim();
+
+  const allResults = [];
+
+  // Buscar em todos os providers configurados
+  const providers = [serperProvider, tavilyProvider].filter(p => p.isConfigured());
+
+  for (const provider of providers) {
+    const results = await provider.search(query, maxResults).catch(() => []);
+    allResults.push(...results);
+  }
+
+  // Se nenhum provider configurado, usar fallback
+  if (allResults.length === 0) {
+    allResults.push(...searchFallback(`${topic} ${discipline}`));
+  }
+
+  // Deduplicar por URL
+  const seen = new Set();
+  const deduplicated = allResults.filter(r => {
+    if (seen.has(r.url)) return false;
+    seen.add(r.url);
+    return true;
+  }).slice(0, maxResults * 2);
+
+  // Opcionalmente extrair conteúdo completo das páginas (top 3 URLs)
+  if (extractContent && deduplicated.length > 0) {
+    const topUrls = deduplicated.slice(0, 3);
+    const extracted = await Promise.allSettled(topUrls.map(r => contentExtractor.extract(r.url)));
+    extracted.forEach((result, i) => {
+      if (result.status === 'fulfilled' && result.value.success) {
+        topUrls[i].content = result.value.text;
+      }
+    });
+  }
+
+  return deduplicated.map(r => ({ ...r, queriedAt }));
 }
 
 // Fallback quando não há API key
@@ -110,4 +170,4 @@ function searchFallback(query) {
   ).slice(0, 3) || mockSources.slice(0, 2);
 }
 
-module.exports = { searchSerper, searchLegislation, scrapeContent };
+module.exports = { searchSerper, searchLegislation, scrapeContent, ragEnrichContext };

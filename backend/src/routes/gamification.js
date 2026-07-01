@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
-const { getRemainingWorkdays, getMonthCalendar } = require('../services/calendar.service');
+const { getRemainingWorkdays, getMonthCalendar, countWorkdays } = require('../services/calendar.service');
 
 // GET /api/gamification/profile — perfil completo do usuário
 router.get('/profile', (req, res, next) => {
@@ -12,6 +12,7 @@ router.get('/profile', (req, res, next) => {
 
     const examDate = profile?.exam_date || process.env.EXAM_DATE || '2026-10-19';
     const remainingDays = getRemainingWorkdays(examDate);
+    const totalDays = countWorkdays(profile?.created_at || new Date().toISOString(), examDate);
 
     const weights = JSON.parse(profile?.discipline_weights || '{"legislacao":40,"logica":35,"matematica":25}');
     const xpToNextLevel = ((profile?.level || 1) * 500) - (profile?.xp || 0);
@@ -27,6 +28,8 @@ router.get('/profile', (req, res, next) => {
       disciplineWeights: weights,
       examDate,
       remainingWorkdays: remainingDays,
+      totalPlannedWorkdays: totalDays,
+      banca: profile?.banca || 'Geral',
       badges,
       xpToNextLevel: Math.max(0, xpToNextLevel),
       levelProgress,
@@ -39,7 +42,7 @@ router.get('/profile', (req, res, next) => {
 // PUT /api/gamification/profile — atualizar perfil
 router.put('/profile', (req, res, next) => {
   try {
-    const { name, disciplineWeights, examDate } = req.body;
+    const { name, disciplineWeights, examDate, banca } = req.body;
     const db = getDb();
 
     const updates = [];
@@ -53,6 +56,7 @@ router.put('/profile', (req, res, next) => {
       // Limpar marcações de dia de descanso a partir de hoje até a data da prova
       db.prepare("DELETE FROM custom_calendar_days WHERE date >= date('now') AND is_workday = 0").run();
     }
+    if (banca) { updates.push('banca = ?'); values.push(banca); }
 
     if (updates.length > 0) {
       db.prepare(`UPDATE user_profile SET ${updates.join(', ')} WHERE id = 1`).run(...values);
@@ -153,9 +157,10 @@ router.get('/calendar', (req, res, next) => {
 
     const studiedSet = studiedDatesRows.map(d => d.date);
 
-    const profile = db.prepare('SELECT exam_date FROM user_profile WHERE id = 1').get();
+    const profile = db.prepare('SELECT created_at, exam_date FROM user_profile WHERE id = 1').get();
     const examDate = profile?.exam_date || process.env.EXAM_DATE || '2026-10-19';
     const calendar = getMonthCalendar(parseInt(year), parseInt(month), studiedSet);
+    const totalDays = countWorkdays(profile?.created_at || new Date().toISOString(), examDate);
 
     res.json({
       year,
@@ -163,6 +168,7 @@ router.get('/calendar', (req, res, next) => {
       days: calendar,
       examDate,
       remainingWorkdays: getRemainingWorkdays(examDate),
+      totalPlannedWorkdays: totalDays,
     });
   } catch (err) {
     next(err);

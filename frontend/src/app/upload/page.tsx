@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import Sidebar from '../../components/Sidebar';
-import { getDocuments, uploadDocument, deleteDocument, analyzeExams, type Document } from '../../lib/api';
+import { getDocuments, uploadDocument, deleteDocument, analyzeExams, updateProfile, getSyllabus, saveSyllabus, invalidateAnalysisCache, type Document } from '../../lib/api';
 import { useEffect } from 'react';
 
 const DOC_TYPES = [
@@ -38,9 +38,20 @@ export default function UploadPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [uploadFeedback, setUploadFeedback] = useState<string | null>(null);
+  const [syllabusContent, setSyllabusContent] = useState('');
+  const [syllabusOriginal, setSyllabusOriginal] = useState('');
+  const [syllabusSavedAt, setSyllabusSavedAt] = useState<string | null>(null);
+  const [syllabusSaving, setSyllabusSaving] = useState(false);
+  const [syllabusFeedback, setSyllabusFeedback] = useState<string | null>(null);
 
   const loadDocs = () => getDocuments().then(setDocs).catch(console.error);
-  useEffect(() => { loadDocs(); }, []);
+  const loadSyllabus = () => getSyllabus().then(s => {
+    setSyllabusContent(s.content);
+    setSyllabusOriginal(s.content);
+    setSyllabusSavedAt(s.savedAt);
+  }).catch(console.error);
+
+  useEffect(() => { loadDocs(); loadSyllabus(); }, []);
 
   // Auto-refresh processing docs
   useEffect(() => {
@@ -77,7 +88,30 @@ export default function UploadPage() {
   async function handleDelete(id: string) {
     if (!confirm('Remover este documento?')) return;
     await deleteDocument(id);
+    // Se o doc deletado for prova ou gabarito, o backend já invalida o cache.
+    // Limpar também o resultado de análise exibido na tela.
+    const deleted = docs.find(d => d.id === id);
+    if (deleted && (deleted.type === 'prova' || deleted.type === 'gabarito')) {
+      setAnalysisResult(null);
+    }
     loadDocs();
+  }
+
+  async function handleSaveSyllabus() {
+    setSyllabusSaving(true);
+    setSyllabusFeedback(null);
+    try {
+      await saveSyllabus(syllabusContent);
+      setSyllabusOriginal(syllabusContent);
+      setSyllabusSavedAt(new Date().toISOString());
+      setSyllabusFeedback('✅ Conteúdo programático salvo com sucesso!');
+      loadDocs();
+    } catch (e: any) {
+      setSyllabusFeedback('❌ Erro ao salvar: ' + e.message);
+    } finally {
+      setSyllabusSaving(false);
+      setTimeout(() => setSyllabusFeedback(null), 4000);
+    }
   }
 
   async function handleAnalyze() {
@@ -174,6 +208,95 @@ export default function UploadPage() {
         {analysisResult && (
           <div className="card" style={{ marginBottom: 'var(--space-6)', borderLeft: '3px solid var(--accent)' }}>
             <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 'var(--space-4)' }}>🎯 Análise das Provas</h2>
+            
+            {/* Banner Premium de Destaque da Banca Identificada */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(123, 44, 191, 0.12) 0%, rgba(90, 107, 140, 0.05) 100%)',
+              border: '1.5px solid rgba(123, 44, 191, 0.25)',
+              borderRadius: 'var(--radius-lg)',
+              padding: 'var(--space-4) var(--space-5)',
+              marginBottom: 'var(--space-4)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-4)',
+            }}>
+              <div style={{ fontSize: 28 }}>🏛️</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: 'var(--text-tertiary)', fontWeight: 600, marginBottom: 2 }}>
+                  Banca Organizadora Detectada
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  {analysisResult.detectedBanca || 'Não Identificada'}
+                  <span style={{ 
+                    fontSize: 10, 
+                    fontWeight: 600, 
+                    color: 'var(--success)', 
+                    background: 'var(--success-dim)', 
+                    padding: '2px 8px', 
+                    borderRadius: 'var(--radius-full)',
+                    marginLeft: 6
+                  }}>
+                    IA DETECTOU
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Banca Selection / Highlight Option */}
+            <div style={{
+              margin: '0 0 var(--space-5)',
+              padding: 'var(--space-4)',
+              background: 'var(--bg-elevated)',
+              borderRadius: 'var(--radius)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 'var(--space-4)',
+              border: '1px solid var(--border-subtle)',
+            }}>
+              <div>
+                <strong style={{ fontSize: 13, display: 'block', marginBottom: 2 }}>Confirmar ou Alterar Banca</strong>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  Esta banca será salva no seu perfil para personalizar seus estudos.
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Banca:</span>
+                <select
+                  value={analysisResult.detectedBanca || 'Geral'}
+                  onChange={async (e) => {
+                    const newBanca = e.target.value;
+                    setAnalysisResult((prev: any) => ({ ...prev, detectedBanca: newBanca }));
+                    try {
+                      await updateProfile({ banca: newBanca });
+                    } catch (err: any) {
+                      console.error('Erro ao atualizar banca:', err.message);
+                    }
+                  }}
+                  style={{
+                    background: 'var(--bg-overlay)',
+                    border: '1.5px solid var(--border)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '6px 12px',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'var(--font-sans)',
+                    fontSize: 13,
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="Geral">Não Identificada / Geral</option>
+                  <option value="CESPE">CESPE / Cebraspe</option>
+                  <option value="FGV">FGV</option>
+                  <option value="FCC">FCC</option>
+                  <option value="Vunesp">Vunesp</option>
+                  {analysisResult.detectedBanca && !['Geral', 'CESPE', 'FGV', 'FCC', 'Vunesp'].includes(analysisResult.detectedBanca) && (
+                    <option value={analysisResult.detectedBanca}>{analysisResult.detectedBanca}</option>
+                  )}
+                </select>
+              </div>
+            </div>
+
             {analysisResult.topTopics && (
               <div style={{ marginBottom: 'var(--space-4)' }}>
                 <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: 'var(--space-3)', textTransform: 'uppercase', letterSpacing: 1 }}>
@@ -203,6 +326,105 @@ export default function UploadPage() {
             )}
           </div>
         )}
+
+        {/* Conteúdo Programático — Editor Manual */}
+        <div className="card" style={{ marginBottom: 'var(--space-6)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-4)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+              <span style={{ fontSize: 22 }}>📋</span>
+              <div>
+                <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Conteúdo Programático</h2>
+                <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0, marginTop: 2 }}>
+                  Cole ou digite o edital diretamente — sem necessidade de arquivo
+                </p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              {syllabusSavedAt && (
+                <span style={{ fontSize: 11, color: 'var(--success)', background: 'var(--success-dim)', padding: '3px 10px', borderRadius: 'var(--radius-full)', fontWeight: 600 }}>
+                  ✓ SALVO
+                </span>
+              )}
+              {!syllabusSavedAt && (
+                <span style={{ fontSize: 11, color: 'var(--text-tertiary)', background: 'var(--bg-elevated)', padding: '3px 10px', borderRadius: 'var(--radius-full)', fontWeight: 600 }}>
+                  NÃO SALVO
+                </span>
+              )}
+            </div>
+          </div>
+
+          <textarea
+            id="syllabus-editor"
+            value={syllabusContent}
+            onChange={e => setSyllabusContent(e.target.value)}
+            placeholder="Cole aqui o conteúdo programático do edital…
+
+Exemplo:
+LEGISLAÇÃO
+- Lei nº 13.709/2018 (LGPD) — Artigos 1 ao 65
+- Lei nº 12.965/2014 (Marco Civil da Internet)
+
+LÓGICA DE PROGRAMAÇÃO
+- Lógica proposicional e predicados
+- Tabelas verdade
+
+MATEMÁTICA
+- Porcentagem, razão e proporção
+- Regra de três simples e composta"
+            style={{
+              width: '100%',
+              minHeight: 180,
+              background: 'var(--bg-elevated)',
+              border: syllabusContent !== syllabusOriginal
+                ? '1.5px solid var(--accent)'
+                : '1.5px solid var(--border)',
+              borderRadius: 'var(--radius)',
+              padding: 'var(--space-4)',
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-mono, monospace)',
+              fontSize: 13,
+              lineHeight: 1.7,
+              resize: 'vertical',
+              outline: 'none',
+              transition: 'border-color var(--transition)',
+              boxSizing: 'border-box',
+            }}
+          />
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'var(--space-3)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', fontSize: 12, color: 'var(--text-tertiary)' }}>
+              <span>{syllabusContent.length.toLocaleString('pt-BR')} caracteres</span>
+              {syllabusSavedAt && (
+                <span>Salvo em {new Date(syllabusSavedAt).toLocaleString('pt-BR')}</span>
+              )}
+              {syllabusFeedback && (
+                <span style={{ color: syllabusFeedback.startsWith('✅') ? 'var(--success)' : 'var(--error)', fontWeight: 600 }}>
+                  {syllabusFeedback}
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+              {syllabusContent !== syllabusOriginal && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setSyllabusContent(syllabusOriginal)}
+                  style={{ fontSize: 12 }}
+                >
+                  Desfazer
+                </button>
+              )}
+              <button
+                id="btn-save-syllabus"
+                className="btn btn-primary btn-sm"
+                onClick={handleSaveSyllabus}
+                disabled={syllabusSaving || syllabusContent === syllabusOriginal}
+                style={{ fontSize: 12 }}
+              >
+                {syllabusSaving ? '⏳ Salvando...' : '💾 Salvar Conteúdo Programático'}
+              </button>
+            </div>
+          </div>
+        </div>
 
         {/* Document list */}
         <div className="card">

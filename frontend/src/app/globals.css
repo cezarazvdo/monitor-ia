@@ -84,17 +84,27 @@
 
   /* Sidebar */
   --sidebar-width: 240px;
+
+  /* Font Scale — controlled by JS, persisted in localStorage */
+  --font-size-base: 15px;
 }
+
+/* Font scale levels applied to <html> */
+html.font-sm { --font-size-base: 13px; }
+html.font-md { --font-size-base: 15px; }
+html.font-lg { --font-size-base: 17px; }
+html.font-xl { --font-size-base: 19px; }
 
 html, body {
   height: 100%;
   background-color: var(--bg-base);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: var(--font-size-base);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: font-size 200ms ease;
 }
 
 #__next, .app-wrapper {

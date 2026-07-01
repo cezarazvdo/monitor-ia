@@ -61,6 +61,16 @@ export default function CalendarPage() {
     }
   }
 
+  const totalDays = data?.totalPlannedWorkdays || 100;
+  const ratio = data ? (data.remainingWorkdays / totalDays) : 1;
+  const isCritical = ratio < 0.20;
+
+  const urgencyColor = isCritical
+    ? 'var(--error)'
+    : ratio < 0.40
+    ? 'var(--warning)'
+    : 'var(--success)';
+
   return (
     <div className="layout">
       <Sidebar />
@@ -70,20 +80,49 @@ export default function CalendarPage() {
           <p>Apenas dias úteis contam. <strong>Dica: clique em qualquer dia para alternar entre dia de estudo e descanso!</strong></p>
         </div>
 
+        {/* Warning Banner for critical time limit (under 20% remaining) */}
+        {isCritical && (
+          <div style={{
+            background: 'var(--error-dim)',
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            borderRadius: 'var(--radius-lg)',
+            padding: 'var(--space-4) var(--space-5)',
+            marginBottom: 'var(--space-8)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-4)',
+            boxShadow: '0 0 15px rgba(239, 68, 68, 0.1)',
+          }}>
+            <span style={{ fontSize: 24 }}>🚨</span>
+            <div>
+              <strong style={{ color: 'var(--error)', display: 'block', marginBottom: 2 }}>Fase Crítica do Cronograma!</strong>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                Resta menos de <strong>20%</strong> do tempo útil previsto para a sua prova (apenas <strong>{data?.remainingWorkdays}</strong> de <strong>{data?.totalPlannedWorkdays}</strong> dias úteis restantes).
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Stats row */}
         <div className="grid-3" style={{ marginBottom: 'var(--space-8)' }}>
-          <div className="stat-card card-accent">
-            <span className="stat-label">📅 Dias Úteis Restantes</span>
-            <span className="stat-value" style={{ color: data && data.remainingWorkdays < 20 ? 'var(--error)' : data && data.remainingWorkdays < 40 ? 'var(--warning)' : 'var(--success)' }}>
+          <div className="stat-card card-accent" style={{
+            borderColor: isCritical ? 'rgba(239, 68, 68, 0.6)' : undefined,
+            boxShadow: isCritical ? '0 0 20px rgba(239, 68, 68, 0.2)' : undefined,
+            background: isCritical ? 'rgba(239, 68, 68, 0.05)' : undefined,
+          }}>
+            <span className="stat-label" style={{ color: isCritical ? 'var(--error)' : undefined, fontWeight: isCritical ? 700 : undefined }}>
+              📅 Dias Úteis Restantes {isCritical && '⚠️'}
+            </span>
+            <span className="stat-value" style={{ color: urgencyColor }}>
               {data?.remainingWorkdays ?? '—'}
             </span>
             <span 
               className="stat-sub" 
-              style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--accent)' }} 
+              style={{ cursor: 'pointer', textDecoration: 'underline', color: isCritical ? 'var(--error)' : 'var(--accent)', fontWeight: isCritical ? 600 : undefined }} 
               onClick={() => { setExamDateInput(examDate); setIsEditingExamDate(true); }}
               title="Editar data da prova"
             >
-              até {examDate} ✏️
+              {isCritical ? 'FASE CRÍTICA · Editar data' : `até ${examDate} ✏️`}
             </span>
           </div>
 

@@ -68,7 +68,11 @@ export default function DashboardPage() {
     ? Math.round(today_acc.correct / today_acc.total * 100)
     : null;
 
-  const urgency = profile && profile.remainingWorkdays < 20 ? 'high' : profile && profile.remainingWorkdays < 40 ? 'medium' : 'low';
+  const totalDays = profile?.totalPlannedWorkdays || 100;
+  const ratio = profile ? (profile.remainingWorkdays / totalDays) : 1;
+  const isCritical = ratio < 0.20;
+
+  const urgency = isCritical ? 'high' : ratio < 0.40 ? 'medium' : 'low';
   const urgencyColor = { high: 'var(--error)', medium: 'var(--warning)', low: 'var(--success)' }[urgency];
 
   return (
@@ -90,6 +94,29 @@ export default function DashboardPage() {
           </Link>
         </div>
 
+        {/* Warning Banner for critical time limit (under 20% remaining) */}
+        {isCritical && (
+          <div style={{
+            background: 'var(--error-dim)',
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            borderRadius: 'var(--radius-lg)',
+            padding: 'var(--space-4) var(--space-5)',
+            marginBottom: 'var(--space-8)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-4)',
+            boxShadow: '0 0 15px rgba(239, 68, 68, 0.1)',
+          }}>
+            <span style={{ fontSize: 24 }}>🚨</span>
+            <div>
+              <strong style={{ color: 'var(--error)', display: 'block', marginBottom: 2 }}>Fase Crítica do Cronograma!</strong>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                Resta menos de <strong>20%</strong> do tempo útil previsto para a sua prova (apenas <strong>{profile?.remainingWorkdays}</strong> de <strong>{profile?.totalPlannedWorkdays}</strong> dias úteis restantes). Intensifique seu ritmo de estudos!
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Stats Row */}
         <div className="grid-4" style={{ marginBottom: 'var(--space-8)' }}>
           <div className="stat-card card-accent">
@@ -102,10 +129,18 @@ export default function DashboardPage() {
             <span className="stat-value">{profile?.level ?? 1}</span>
             <span className="stat-sub">{profile?.xp ?? 0} XP total</span>
           </div>
-          <div className="stat-card">
-            <span className="stat-label">📅 Dias Úteis</span>
+          <div className="stat-card" style={{
+            borderColor: isCritical ? 'rgba(239, 68, 68, 0.6)' : undefined,
+            boxShadow: isCritical ? '0 0 20px rgba(239, 68, 68, 0.2)' : undefined,
+            background: isCritical ? 'rgba(239, 68, 68, 0.05)' : undefined,
+          }}>
+            <span className="stat-label" style={{ color: isCritical ? 'var(--error)' : undefined, fontWeight: isCritical ? 700 : undefined }}>
+              📅 Dias Úteis {isCritical && '⚠️'}
+            </span>
             <span className="stat-value" style={{ color: urgencyColor }}>{profile?.remainingWorkdays ?? '—'}</span>
-            <span className="stat-sub">até o concurso</span>
+            <span className="stat-sub" style={{ color: isCritical ? 'var(--error)' : undefined, fontWeight: isCritical ? 600 : undefined }}>
+              {isCritical ? 'Fase Crítica!' : 'até o concurso'}
+            </span>
           </div>
           <div className="stat-card">
             <span className="stat-label">🎯 Hoje</span>

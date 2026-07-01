@@ -1,5 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { searchSerper } = require('./search.service');
+const PreReadingPipeline = require('../pipeline/PreReadingPipeline');
+
 
 let client = null;
 
@@ -27,83 +29,133 @@ function getModel(options = {}) {
   });
 }
 
-// Gerar pré-leitura (conteúdo teórico breve)
-async function generatePreReading({ discipline, topic, subtopic, examPatterns, documents }) {
-  const model = getModel();
-
-  if (!model) {
-    return generateMockPreReading(discipline, topic);
+// Gerar pré-leitura (conteúdo teórico breve) — agora via pipeline de qualidade
+async function generatePreReading({ discipline, topic, subtopic, examPatterns, documents, sessionId, banca }) {
+  // Sem API key → fallback para mock
+  if (!process.env.GEMINI_API_KEY) {
+    return { content: generateMockPreReading(discipline, topic) };
   }
-
-  // Buscar na web via Serper para enriquecer o contexto
-  const searchResults = await searchSerper(`${topic} ${subtopic || ''} concurso público`, 3).catch(() => []);
-
-  const contextParts = [];
-  if (examPatterns && examPatterns.length > 0) {
-    contextParts.push(`Padrões identificados nas provas: ${examPatterns.join('; ')}`);
-  }
-  if (documents && documents.length > 0) {
-    const docContext = documents.slice(0, 2).map(d => d.text_content?.slice(0, 1000)).filter(Boolean).join('\n\n');
-    if (docContext) contextParts.push(`Contexto dos documentos:\n${docContext}`);
-  }
-  if (searchResults && searchResults.length > 0) {
-    const searchContext = searchResults.map(r => `Título: ${r.title}\nTrecho: ${r.snippet}\nLink: ${r.url}`).join('\n\n');
-    if (searchContext) contextParts.push(`Resultados da busca web (Serper):\n${searchContext}`);
-  }
-
-  const prompt = `Gere um texto de pré-leitura (máximo 5 minutos de leitura, ~600 palavras) sobre:
-Disciplina: ${discipline}
-Tópico: ${topic}
-${subtopic ? `Subtópico: ${subtopic}` : ''}
-${contextParts.length > 0 ? '\n' + contextParts.join('\n') : ''}
-
-O texto deve:
-1. Ser objetivo e direto ao ponto
-2. Destacar os pontos mais cobrados em provas
-3. Incluir exemplos práticos quando relevante
-4. Usar formatação com seções claras (use ## para subtítulos)
-5. Terminar com um resumo de 3 pontos-chave
-6. Para legislação: cite artigos e parágrafos específicos
-7. OBRIGATÓRIO (IDENTIFICAÇÃO DE FONTES): No início de cada parágrafo, seção ou ponto chave do texto teórico, adicione uma das seguintes flags/tags em negrito de acordo com a origem real daquela informação:
-   - **[IA]**: para conceitos baseados no seu próprio conhecimento geral.
-   - **[Documento]**: para fatos tirados diretamente da seção "Contexto dos documentos".
-   - **[Busca]**: para dados ou detalhes vindos da seção "Resultados da busca web (Serper)".
-   Você DEVE iniciar o conteúdo com uma linha destacada em itálico e negrito explicando a legenda das flags (ex: "*Origem das informações: [IA] Inteligência Artificial | [Documento] Documentos Enviados | [Busca] Busca Web*").
-8. OBRIGATÓRIO (MAPA MENTAL): Adicione no final do conteúdo um mapa mental resumido usando a sintaxe Mermaid (bloco de código com a linguagem 'mermaid', usando diagramas do tipo flowchart, ex: 'graph TD' ou 'graph LR') para esquematizar de forma visual e intuitiva o assunto abordado e as relações com os pontos mais cobrados nas provas. Use caixas de texto com rótulos curtos e conexões diretas. Evite caracteres especiais incompatíveis com a sintaxe do Mermaid nos IDs dos nós (use letras e números e adicione o texto entre aspas se necessário, ex: no1["Texto do Nó"]).`;
 
   try {
-    const result = await model.generateContent(prompt);
-    return { content: result.response.text() };
+    const result = await PreReadingPipeline.run({
+      discipline,
+      topic,
+      subtopic,
+      examPatterns,
+      documents,
+      banca,
+    });
+
+    // Persistir auditoria no banco (lazy require para evitar circular deps)
+    try {
+      const { getDb } = require('../db/database');
+      const db = getDb();
+      db.prepare(`
+        INSERT INTO content_generations
+          (id, session_id, discipline, topic, subtopic, model_used, pipeline_steps,
+           sources_used, quality_score, final_content, duration_ms, had_revision_issues)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        result.pipelineId,
+        sessionId || null,
+        discipline,
+        topic,
+        subtopic || null,
+        'gemini-2.5-flash',
+        JSON.stringify(result.stepsCompleted),
+        JSON.stringify(result.ragSources.map(s => ({ title: s.title, url: s.url, source: s.source }))),
+        JSON.stringify(result.qualityScore),
+        result.content?.slice(0, 50000) || '',
+        result.totalDurationMs,
+        result.hadRevisionIssues ? 1 : 0
+      );
+    } catch (dbErr) {
+      console.warn('[GEMINI] Falha ao salvar auditoria de geração:', dbErr.message);
+    }
+
+    return {
+      content: result.content,
+      pipelineId: result.pipelineId,
+      qualityScore: result.qualityScore,
+      ragSources: result.ragSources,
+      stepsCompleted: result.stepsCompleted,
+    };
   } catch (error) {
-    console.warn('[GEMINI API WARNING] Fallback to mock pre-reading:', error.message);
+    console.warn('[GEMINI API WARNING] Pipeline falhou — Fallback para mock:', error.message);
     return { content: generateMockPreReading(discipline, topic), apiWarning: error.message };
   }
 }
 
+
+// Gerar distribuição aleatória de dificuldades (2 fácil + 3 médio + 2 difícil embaralhados)
+function generateRandomDifficulties(total = 7) {
+  // Distribuição base: 2 fácil, 3 médio, 2 difícil
+  const base = [1, 1, 2, 2, 2, 3, 3];
+  // Completar ou truncar para o total desejado
+  const pool = [];
+  while (pool.length < total) {
+    pool.push(...base);
+  }
+  const sized = pool.slice(0, total);
+  // Fisher-Yates shuffle
+  for (let i = sized.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [sized[i], sized[j]] = [sized[j], sized[i]];
+  }
+  return sized;
+}
+
 // Gerar questões estilo concurso
-async function generateQuestions({ discipline, topic, content, count = 10, examPatterns, difficulty = 2 }) {
+async function generateQuestions({ discipline, topic, content, count = 7, examPatterns, difficulties, difficulty = 2, banca = 'Geral', examContext = '' }) {
   const model = getModel();
 
+  // Garantir sempre 7 questões e montar a lista de dificuldades
+  const total = 7;
+  // Dificuldades aleatórias: ignora o parâmetro `difficulty` único e gera distribuição real
+  const diffList = (difficulties && difficulties.length === total)
+    ? difficulties
+    : generateRandomDifficulties(total);
+
+  const diffLabels = { 1: 'fácil', 2: 'médio', 3: 'difícil' };
+
   if (!model) {
-    return generateMockQuestions(discipline, topic, count);
+    return { questions: generateMockQuestions(discipline, topic, total) };
   }
 
-  const prompt = `Gere exatamente ${count} questões objetivas estilo concurso sobre:
+  const questionsSpec = diffList.map((d, i) =>
+    `  Questão ${i + 1}: dificuldade ${d}/3 (${diffLabels[d] || 'médio'})`
+  ).join('\n');
+
+  const prompt = `Gere exatamente ${total} questões objetivas estilo concurso sobre:
 Disciplina: ${discipline}
 Tópico: ${topic}
-Dificuldade: ${difficulty}/3
+Banca selecionada: ${banca}
+
+Especificação de dificuldade por questão (siga RIGOROSAMENTE — cada questão tem nível INDEPENDENTE):
+${questionsSpec}
 
 Baseie as questões no seguinte conteúdo:
 ${content?.slice(0, 2000) || topic}
 
 ${examPatterns?.length > 0 ? `Padrões das provas anteriores: ${examPatterns.join('; ')}` : ''}
+${examContext ? `
+== ANÁLISE DAS PROVAS ANEXADAS (USE COMO REFERÊNCIA OBRIGATÓRIA) ==
+${examContext}
+` : ''}
 
 REGRAS OBRIGATÓRIAS:
+- As questões DEVEM seguir os padrões de formato e estilo identificados nas provas anexadas acima.
 - Cada questão tem exatamente 4 alternativas (A, B, C, D)
 - Uma única alternativa correta
-- Na propriedade "explanation", faça um gabarito comentado detalhado. Você DEVE explicar por que a resposta correta está certa E também detalhar o que está incorreto em CADA UMA das alternativas erradas (discordâncias com o texto/lei de referência).
+- OBRIGATÓRIO (ESTILO DA BANCA): Adapte estritamente o formato e complexidade dos enunciados ao estilo da banca "${banca}" (ex: enunciados longos e práticos com situações hipotéticas se FGV; enunciados objetivos e focados se CESPE; cobrança de literalidade jurídica e doutrina direta se FCC ou Vunesp).
+- Questões de dificuldade 1 (fácil): conceito direto, alternativas claras, sem pegadinha
+- Questões de dificuldade 2 (médio): aplicação do conceito, alguma abstração
+- Questões de dificuldade 3 (difícil): situações complexas, múltiplos conceitos, pegadinhas sutis
+- A distribuição de dificuldade É ALEATÓRIA — cada questão tem seu próprio nível conforme especificado acima.
+- Na propriedade "explanation", faça um gabarito comentado detalhado. Você DEVE explicar por que a resposta correta está certa E também detalhar o que está incorreto em CADA UMA das alternativas erradas.
 - Misture questões conceituais e aplicadas
 - Para legislação: inclua questões sobre artigos específicos
+- O campo "difficulty" em cada questão deve refletir o nível especificado acima (1, 2 ou 3)
 
 Responda APENAS com JSON válido no formato:
 {
@@ -131,9 +183,10 @@ Responda APENAS com JSON válido no formato:
     return { questions: parsed };
   } catch (error) {
     console.warn('[GEMINI API WARNING] Fallback to mock questions:', error.message);
-    return { questions: generateMockQuestions(discipline, topic, count), apiWarning: error.message };
+    return { questions: generateMockQuestions(discipline, topic, total), apiWarning: error.message };
   }
 }
+
 
 // Gerar explicação detalhada para erro
 async function generateErrorExplanation({ question, userAnswer, correctAnswer, discipline }) {
@@ -181,6 +234,7 @@ ${combined}
 
 Retorne JSON com:
 {
+  "detectedBanca": "Nome exato da banca organizadora identificada nas provas. Identifique a banca real presente no documento, seja qual for. Use 'Não identificada' se não encontrar.",
   "patterns": ["padrão 1", "padrão 2", ...],
   "topTopics": [
     {"discipline": "...", "topic": "...", "frequency": 5, "difficulty": 2}
@@ -282,15 +336,13 @@ function generateMockQuestions(discipline, topic, count) {
 
 function generateMockAnalysis() {
   return {
+    detectedBanca: 'CESPE',
     patterns: ['Questões sobre LGPD são frequentes', 'Lógica proposicional recorrente', 'Matemática financeira básica'],
     topTopics: [
       { discipline: 'Legislação', topic: 'LGPD', frequency: 8, difficulty: 2 },
       { discipline: 'Lógica', topic: 'Proposições', frequency: 6, difficulty: 2 },
       { discipline: 'Matemática', topic: 'Porcentagem', frequency: 5, difficulty: 1 },
     ],
-    commonMistakes: ['Confundir controlador e operador na LGPD', 'Erros em silogismos'],
-    questionTypes: ['Certo/Errado', 'Múltipla escolha', 'Completar lacuna'],
-    recommendations: ['Priorize LGPD e ISO 27001', 'Pratique lógica diariamente'],
   };
 }
 

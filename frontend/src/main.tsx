@@ -2,6 +2,15 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import './app/globals.css';
+
+// ── Bootstrap da fonte — aplicado ANTES do React renderizar (evita flash) ──
+;(function() {
+  const LEVELS = ['font-sm', 'font-md', 'font-lg', 'font-xl'];
+  const saved = localStorage.getItem('monitor-ia:font-scale');
+  const scale = saved && LEVELS.includes(saved) ? saved : 'font-md';
+  document.documentElement.classList.add(scale);
+})();
+
 import Dashboard from './app/page';
 import StudyPage from './app/study/page';
 import CalendarPage from './app/calendar/page';

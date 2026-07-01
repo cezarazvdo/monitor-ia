@@ -26,6 +26,7 @@ function initDatabase() {
       id INTEGER PRIMARY KEY DEFAULT 1,
       name TEXT DEFAULT 'Estudante',
       exam_date TEXT DEFAULT '2026-10-19',
+      banca TEXT DEFAULT 'Geral',
       xp INTEGER DEFAULT 0,
       level INTEGER DEFAULT 1,
       streak INTEGER DEFAULT 0,
@@ -144,7 +145,71 @@ function initDatabase() {
       date TEXT PRIMARY KEY,
       is_workday INTEGER NOT NULL
     );
+
+    -- Auditoria das gerações de pré-leitura (pipeline RAG)
+    CREATE TABLE IF NOT EXISTS content_generations (
+      id TEXT PRIMARY KEY,
+      session_id TEXT,
+      discipline TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      subtopic TEXT,
+      model_used TEXT,
+      pipeline_steps TEXT,
+      sources_used TEXT,
+      quality_score TEXT,
+      draft_content TEXT,
+      final_content TEXT,
+      duration_ms INTEGER DEFAULT 0,
+      had_revision_issues INTEGER DEFAULT 0,
+      generated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (session_id) REFERENCES study_sessions(id)
+    );
+
+    -- Cache de resumos estruturados dos documentos (economia de tokens)
+    CREATE TABLE IF NOT EXISTS document_summaries (
+      id TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL,
+      summary_type TEXT NOT NULL,
+      structured_summary TEXT NOT NULL,
+      key_topics TEXT,
+      char_count INTEGER DEFAULT 0,
+      original_char_count INTEGER DEFAULT 0,
+      generated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+    );
+
+    -- Cache da análise de provas via IA (evita re-chamadas desnecessárias)
+    CREATE TABLE IF NOT EXISTS exam_analysis_cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      doc_ids_hash TEXT NOT NULL UNIQUE,
+      analysis_json TEXT NOT NULL,
+      doc_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
+
+  // Migração: adicionar coluna banca ao perfil se não existir
+  try {
+    db.exec("ALTER TABLE user_profile ADD COLUMN banca TEXT DEFAULT 'Geral'");
+    console.log("[DB] Coluna 'banca' adicionada com sucesso ao perfil");
+  } catch (e) {
+    // Coluna já existe
+  }
+
+  // Migração: criar tabela de cache de análise se não existir (bancos legados)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS exam_analysis_cache (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        doc_ids_hash TEXT NOT NULL UNIQUE,
+        analysis_json TEXT NOT NULL,
+        doc_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+  } catch (e) {
+    // Tabela já existe
+  }
 
   console.log('[DB] Banco de dados inicializado com sucesso');
 }

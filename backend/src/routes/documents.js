@@ -58,6 +58,16 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
           .run(textContent.slice(0, 100000), id);
 
         console.log(`[DOC] Processado: ${req.file.originalname} (${textContent.length} chars)`);
+
+        // Gerar resumo estruturado em background (economia de tokens para chamadas futuras)
+        setImmediate(async () => {
+          try {
+            const { summarizeDocument } = require('../services/summarizer.service');
+            await summarizeDocument(id);
+          } catch (sumErr) {
+            console.warn('[DOC] Resumo não gerado (será criado sob demanda):', sumErr.message);
+          }
+        });
       } catch (err) {
         console.error('[DOC] Erro ao processar:', err.message);
         db.prepare('UPDATE documents SET processed = -1 WHERE id = ?').run(id);
@@ -110,16 +120,77 @@ router.get('/', (req, res, next) => {
 router.delete('/:id', (req, res, next) => {
   try {
     const db = getDb();
-    const doc = db.prepare('SELECT filename FROM documents WHERE id = ?').get(req.params.id);
+    const doc = db.prepare('SELECT filename, type FROM documents WHERE id = ?').get(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Documento não encontrado' });
 
     db.prepare('DELETE FROM documents WHERE id = ?').run(req.params.id);
 
-    const fs = require('fs');
-    const filePath = path.join(uploadsDir, doc.filename);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    // Invalidar cache de análise se for prova ou gabarito
+    if (doc.type === 'prova' || doc.type === 'gabarito') {
+      const removed = db.prepare('DELETE FROM exam_analysis_cache').run();
+      if (removed.changes > 0) {
+        console.log(`[DOC] Cache de análise invalidado após remoção de ${doc.type}`);
+      }
+    }
+
+    // Remover arquivo físico (documentos manuais não têm arquivo)
+    if (doc.filename && doc.filename !== 'manual') {
+      const fs = require('fs');
+      const filePath = path.join(uploadsDir, doc.filename);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
 
     res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/documents/syllabus — buscar conteúdo programático salvo
+router.get('/syllabus', (req, res, next) => {
+  try {
+    const db = getDb();
+    const doc = db.prepare(
+      "SELECT id, text_content, uploaded_at FROM documents WHERE id = 'syllabus-manual'"
+    ).get();
+    res.json({
+      content: doc?.text_content || '',
+      savedAt: doc?.uploaded_at || null,
+      exists: !!doc,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/documents/syllabus — salvar/atualizar conteúdo programático como texto
+router.put('/syllabus', (req, res, next) => {
+  try {
+    const { content } = req.body;
+    if (typeof content !== 'string') {
+      return res.status(400).json({ error: 'Campo content é obrigatório' });
+    }
+    const db = getDb();
+    const trimmed = content.trim();
+
+    if (trimmed === '') {
+      // Remover se vazio
+      db.prepare("DELETE FROM documents WHERE id = 'syllabus-manual'").run();
+      return res.json({ success: true, deleted: true });
+    }
+
+    // Upsert: cria ou sobrescreve o registro manual
+    db.prepare(`
+      INSERT INTO documents (id, filename, original_name, type, size_bytes, text_content, processed)
+      VALUES ('syllabus-manual', 'manual', 'Conteúdo Programático (Manual)', 'edital', ?, ?, 1)
+      ON CONFLICT(id) DO UPDATE SET
+        text_content = excluded.text_content,
+        size_bytes = excluded.size_bytes,
+        uploaded_at = datetime('now')
+    `).run(trimmed.length, trimmed.slice(0, 100000));
+
+    console.log(`[DOC] Conteúdo programático salvo manualmente (${trimmed.length} chars)`);
+    res.json({ success: true, chars: trimmed.length });
   } catch (err) {
     next(err);
   }
@@ -136,6 +207,40 @@ router.get('/:id/status', (req, res, next) => {
       id: doc.id,
       name: doc.original_name,
       status: doc.processed === 1 ? 'done' : doc.processed === -1 ? 'error' : 'processing',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/documents/:id/summary — resumo estruturado do documento (cache)
+router.get('/:id/summary', async (req, res, next) => {
+  try {
+    const db = getDb();
+    const doc = db.prepare('SELECT id, original_name, processed FROM documents WHERE id = ?').get(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Documento não encontrado' });
+    if (doc.processed !== 1) return res.status(400).json({ error: 'Documento ainda não foi processado' });
+
+    const { getOrCreateSummary } = require('../services/summarizer.service');
+    const summary = await getOrCreateSummary(doc.id);
+
+    // Buscar metadados do cache
+    const meta = db.prepare(
+      'SELECT char_count, original_char_count, generated_at FROM document_summaries WHERE document_id = ?'
+    ).get(doc.id);
+
+    res.json({
+      documentId: doc.id,
+      documentName: doc.original_name,
+      summary,
+      meta: meta ? {
+        compressedSize: meta.char_count,
+        originalSize: meta.original_char_count,
+        savingsPercent: meta.original_char_count > 0
+          ? Math.round((1 - meta.char_count / meta.original_char_count) * 100)
+          : 0,
+        generatedAt: meta.generated_at,
+      } : null,
     });
   } catch (err) {
     next(err);

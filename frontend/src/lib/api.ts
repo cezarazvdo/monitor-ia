@@ -46,7 +46,14 @@ export const getWeakTopics = () => fetchAPI<WeakTopic[]>('/sessions/weak-topics'
 
 // ─── AI ──────────────────────────────────────────────────────────────────────
 export const generatePreReading = (data: { discipline: string; topic: string; subtopic?: string; sessionId?: string }) =>
-  fetchAPI<{ content: string; apiWarning?: string; sources?: { name: string; type: string }[] }>('/ai/pre-reading', { method: 'POST', body: JSON.stringify(data) });
+  fetchAPI<{
+    content: string;
+    apiWarning?: string;
+    pipelineId?: string | null;
+    qualityScore?: ContentQualityScore | null;
+    stepsCompleted?: string[] | null;
+    sources?: { name: string; url?: string; type: string }[];
+  }>('/ai/pre-reading', { method: 'POST', body: JSON.stringify(data) });
 
 export const generateQuestions = (data: { discipline: string; topic: string; content?: string; count?: number; sessionId?: string; difficulty?: number }) =>
   fetchAPI<{ questions: Question[]; apiWarning?: string }>('/ai/questions', { method: 'POST', body: JSON.stringify(data) });
@@ -59,6 +66,18 @@ export const analyzeExams = () => fetchAPI('/ai/analyze-exams', { method: 'POST'
 export const fixMermaid = (data: { chart: string }) =>
   fetchAPI<{ content: string; error?: string }>('/ai/fix-mermaid', { method: 'POST', body: JSON.stringify(data) });
 
+export const getGenerationAudit = (id: string) =>
+  fetchAPI<GenerationAudit>('/ai/generation/' + id);
+
+export const getStudyContext = () =>
+  fetchAPI<{
+    hasAnalysis: boolean;
+    banca: string;
+    disciplineSummary: { discipline: string; topicCount: number; totalFrequency: number }[];
+    topTopics: Record<string, { topic: string; frequency: number; difficulty: number }[]>;
+  }>('/ai/study-context');
+
+
 // ─── Documents ───────────────────────────────────────────────────────────────
 export const getDocuments = () => fetchAPI<Document[]>('/documents');
 export const deleteDocument = (id: string) => fetchAPI('/documents/' + id, { method: 'DELETE' });
@@ -70,6 +89,18 @@ export const uploadDocument = async (file: File, type: string) => {
   if (!res.ok) throw new Error('Upload falhou');
   return res.json();
 };
+
+export const getSyllabus = () =>
+  fetchAPI<{ content: string; savedAt: string | null; exists: boolean }>('/documents/syllabus');
+
+export const saveSyllabus = (content: string) =>
+  fetchAPI<{ success: boolean; chars?: number; deleted?: boolean }>('/documents/syllabus', {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  });
+
+export const invalidateAnalysisCache = () =>
+  fetchAPI<{ success: boolean; removed: number }>('/ai/analyze-exams/cache', { method: 'DELETE' });
 
 // ─── Search ──────────────────────────────────────────────────────────────────
 export const searchWeb = (q: string, type?: string) =>
@@ -89,6 +120,8 @@ export interface Profile {
   disciplineWeights: Record<string, number>;
   examDate: string;
   remainingWorkdays: number;
+  totalPlannedWorkdays: number;
+  banca: string;
   badges: Badge[];
   xpToNextLevel: number;
   levelProgress: number;
@@ -132,6 +165,7 @@ export interface CalendarData {
   days: CalendarDay[];
   examDate: string;
   remainingWorkdays: number;
+  totalPlannedWorkdays: number;
 }
 
 export interface CalendarDay {
@@ -201,4 +235,36 @@ export interface HealthCheck {
   hasGemini: boolean;
   hasSerper: boolean;
   examDate: string;
+}
+
+export interface ContentQualityScore {
+  factualAccuracy: number;
+  clarity: number;
+  syllabusCoverage: number;
+  bancaAlignment: number;
+  overallScore: number;
+  feedback?: string;
+}
+
+export interface RagSource {
+  title: string;
+  url: string;
+  snippet: string;
+  source: string;
+  queriedAt?: string;
+}
+
+export interface GenerationAudit {
+  id: string;
+  sessionId: string | null;
+  discipline: string;
+  topic: string;
+  subtopic: string | null;
+  modelUsed: string;
+  pipelineSteps: string[];
+  sourcesUsed: RagSource[];
+  qualityScore: ContentQualityScore | null;
+  durationMs: number;
+  hadRevisionIssues: boolean;
+  generatedAt: string;
 }

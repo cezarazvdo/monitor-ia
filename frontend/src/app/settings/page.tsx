@@ -15,6 +15,7 @@ export default function SettingsPage() {
   const [health, setHealth] = useState<HealthCheck | null>(null);
   const [name, setName] = useState('');
   const [examDate, setExamDate] = useState('2026-10-19');
+  const [banca, setBanca] = useState('Geral');
   const [weights, setWeights] = useState<Record<string, number>>({ legislacao: 40, logica: 35, matematica: 25 });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -25,6 +26,7 @@ export default function SettingsPage() {
       setHealth(h);
       setName(p.name);
       setExamDate(p.examDate);
+      setBanca(p.banca || 'Geral');
       setWeights(p.disciplineWeights);
     }).catch(console.error);
   }, []);
@@ -38,7 +40,7 @@ export default function SettingsPage() {
   async function handleSave() {
     setSaving(true);
     try {
-      await updateProfile({ name, disciplineWeights: weights, examDate });
+      await updateProfile({ name, disciplineWeights: weights, examDate, banca });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (e: any) {
@@ -141,6 +143,35 @@ export default function SettingsPage() {
                   colorScheme: 'dark',
                 }}
               />
+            </div>
+
+            <div style={{ marginBottom: 'var(--space-4)' }}>
+              <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 'var(--space-2)' }}>
+                Banca do Concurso
+              </label>
+              <select
+                id="select-banca"
+                value={banca}
+                onChange={e => setBanca(e.target.value)}
+                style={{
+                  width: '100%',
+                  background: 'var(--bg-elevated)',
+                  border: '1.5px solid var(--border)',
+                  borderRadius: 'var(--radius)',
+                  padding: 'var(--space-3) var(--space-4)',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-sans)',
+                  fontSize: 14,
+                  outline: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="Geral">Geral (Estilo Misto)</option>
+                <option value="CESPE">CESPE / Cebraspe (Objetivo & Certo/Errado)</option>
+                <option value="FGV">FGV (Casos Complexos & Situações)</option>
+                <option value="FCC">FCC (Literalidade de Leis & Doutrina)</option>
+                <option value="Vunesp">Vunesp (Literalidade de Leis Direta)</option>
+              </select>
             </div>
 
             {profile && (

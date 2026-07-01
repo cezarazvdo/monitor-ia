@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import MermaidChart from '../../components/MermaidChart';
 import {
   startSession, generatePreReading, generateQuestions,
-  submitAnswer, completeSession, explainError,
+  submitAnswer, completeSession, explainError, getStudyContext,
   type Question, type StudySession,
 } from '../../lib/api';
 
@@ -33,7 +33,9 @@ export default function StudyPage() {
   const [topic, setTopic] = useState(TOPICS.legislacao[0]);
   const [session, setSession] = useState<StudySession | null>(null);
   const [preReadingContent, setPreReadingContent] = useState('');
-  const [preReadingSources, setPreReadingSources] = useState<{ name: string; type: string }[]>([]);
+  const [preReadingSources, setPreReadingSources] = useState<{ name: string; url?: string; type: string }[]>([]);
+  const [qualityScore, setQualityScore] = useState<{ overallScore: number; feedback?: string } | null>(null);
+  const [pipelineStep, setPipelineStep] = useState<string>('');
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentQ, setCurrentQ] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -48,15 +50,52 @@ export default function StudyPage() {
   const [correctCount, setCorrectCount] = useState(0);
   const [detailedExplanation, setDetailedExplanation] = useState<string | null>(null);
   const [loadingExplain, setLoadingExplain] = useState(false);
+  const [preReadingFromCache, setPreReadingFromCache] = useState(false);
+  const [preReadingCachedAt, setPreReadingCachedAt] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
+  // Contexto de estudo personalizado pelas provas analisadas
+  const [studyContext, setStudyContext] = useState<{
+    hasAnalysis: boolean;
+    banca: string;
+    disciplineSummary: { discipline: string; topicCount: number; totalFrequency: number }[];
+    topTopics: Record<string, { topic: string; frequency: number; difficulty: number }[]>;
+  } | null>(null);
+
   useEffect(() => {
-    setTopic(TOPICS[discipline][0]);
-  }, [discipline]);
+    getStudyContext().then(setStudyContext).catch(() => {});
+  }, []);
+
+  // Mescla tópicos da análise (prioritários) com os tópicos padrão (fallback)
+  function getTopicsForDiscipline(disc: string): { label: string; fromAnalysis: boolean; frequency?: number }[] {
+    const analysisTopics = studyContext?.topTopics?.[disc] ?? [];
+    const analysisLabels = new Set(analysisTopics.map(t => t.topic));
+    const defaultFallback = (TOPICS[disc] || []).filter(t => !analysisLabels.has(t));
+    return [
+      ...analysisTopics.map(t => ({ label: t.topic, fromAnalysis: true, frequency: t.frequency })),
+      ...defaultFallback.map(t => ({ label: t, fromAnalysis: false })),
+    ];
+  }
+
+  // Verifica se uma disciplina teve tópicos identificados nas provas
+  function getDisciplineFrequency(disc: string): number {
+    return studyContext?.disciplineSummary?.find(
+      d => d.discipline.toLowerCase() === disc.toLowerCase() ||
+           d.discipline.toLowerCase().includes(disc.toLowerCase()) ||
+           disc.toLowerCase().includes(d.discipline.toLowerCase())
+    )?.totalFrequency ?? 0;
+  }
+
+  useEffect(() => {
+    const merged = getTopicsForDiscipline(discipline);
+    if (merged.length > 0) setTopic(merged[0].label);
+    else setTopic(TOPICS[discipline]?.[0] ?? '');
+  }, [discipline, studyContext]);
 
   // Phase 1 → Start session + generate pre-reading
-  async function handleStartSession() {
+  async function handleStartSession(force_refresh = false) {
     setLoading(true);
+    setPipelineStep('Iniciando sessão...');
     try {
       const s = await startSession({ discipline, topic });
       setSession({
@@ -67,16 +106,44 @@ export default function StudyPage() {
         phase: 'pre_reading',
         status: 'active',
       });
-      const pr = await generatePreReading({ discipline, topic, sessionId: s.sessionId });
+      setPipelineStep(force_refresh ? 'Regenerando conteúdo...' : 'Verificando cache...');
+      await new Promise(r => setTimeout(r, 300));
+      if (!force_refresh) setPipelineStep('Buscando fontes e enriquecendo contexto (RAG)...');
+      const pr = await generatePreReading({ discipline, topic, sessionId: s.sessionId, ...(force_refresh ? { force_refresh: true } : {}) } as any);
       setPreReadingContent(pr.content);
       setPreReadingSources(pr.sources || []);
+      setPreReadingFromCache(!!(pr as any).fromCache);
+      setPreReadingCachedAt((pr as any).cachedAt || null);
+      if (pr.qualityScore) setQualityScore(pr.qualityScore);
       if (pr.apiWarning) setApiWarning(pr.apiWarning);
       else setApiWarning(null);
+      setPipelineStep('');
       setPhase('pre_reading');
     } catch (e: any) {
       alert('Erro ao iniciar sessão: ' + e.message);
+      setPipelineStep('');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleRefreshPreReading() {
+    setLoading(true);
+    setPipelineStep('Regenerando conteúdo com IA...');
+    try {
+      const pr = await generatePreReading({ discipline, topic, sessionId: session?.id, force_refresh: true } as any);
+      setPreReadingContent(pr.content);
+      setPreReadingSources(pr.sources || []);
+      setPreReadingFromCache(false);
+      setPreReadingCachedAt(null);
+      if (pr.qualityScore) setQualityScore(pr.qualityScore);
+      if (pr.apiWarning) setApiWarning(pr.apiWarning);
+      else setApiWarning(null);
+    } catch (e: any) {
+      alert('Erro ao regenerar: ' + e.message);
+    } finally {
+      setLoading(false);
+      setPipelineStep('');
     }
   }
 
@@ -243,47 +310,134 @@ export default function StudyPage() {
               <p>Escolha a disciplina e o tópico para esta sessão</p>
             </div>
 
+            {/* Banner de personalização — aparece quando há análise de provas */}
+            {studyContext?.hasAnalysis && (
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(123, 44, 191, 0.10) 0%, rgba(52, 211, 153, 0.05) 100%)',
+                border: '1.5px solid rgba(123, 44, 191, 0.20)',
+                borderRadius: 'var(--radius-lg)',
+                padding: 'var(--space-3) var(--space-4)',
+                marginBottom: 'var(--space-5)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-3)',
+              }}>
+                <span style={{ fontSize: 22 }}>🎯</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>
+                    Personalizado pelas suas provas
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                    Banca detectada: <strong style={{ color: 'var(--accent)' }}>{studyContext.banca}</strong>
+                    {' · '}
+                    {studyContext.disciplineSummary.length} disciplina{studyContext.disciplineSummary.length !== 1 ? 's' : ''} identificada{studyContext.disciplineSummary.length !== 1 ? 's' : ''}
+                    {' · '}
+                    Tópicos ordenados por frequência nas provas
+                  </div>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--success)', background: 'var(--success-dim)', padding: '3px 10px', borderRadius: 'var(--radius-full)' }}>
+                  ✓ ATIVO
+                </span>
+              </div>
+            )}
+
+            {/* Banner fallback — sem análise */}
+            {studyContext && !studyContext.hasAnalysis && (
+              <div style={{
+                background: 'var(--bg-elevated)',
+                border: '1px dashed var(--border)',
+                borderRadius: 'var(--radius-lg)',
+                padding: 'var(--space-3) var(--space-4)',
+                marginBottom: 'var(--space-5)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-3)',
+                fontSize: 13,
+                color: 'var(--text-secondary)',
+              }}>
+                <span>📂</span>
+                <span>
+                  Envie suas provas em{' '}
+                  <Link to="/upload" style={{ color: 'var(--accent)', fontWeight: 600 }}>↗ Documentos</Link>
+                  {' '}para personalizar os tópicos com base nas suas provas reais.
+                </span>
+              </div>
+            )}
+
             <div className="card" style={{ marginBottom: 'var(--space-6)' }}>
               <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 'var(--space-5)' }}>Disciplina</h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)' }}>
-                {DISCIPLINES.map(d => (
-                  <button
-                    key={d.key}
-                    id={`discipline-${d.key}`}
-                    onClick={() => setDiscipline(d.key)}
-                    style={{
-                      padding: 'var(--space-4)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: discipline === d.key ? `2px solid ${d.color}` : '1.5px solid var(--border)',
-                      background: discipline === d.key ? `rgba(${d.color === 'var(--legislacao)' ? '129,140,248' : d.color === 'var(--logica)' ? '52,211,153' : d.color === 'var(--matematica)' ? '251,146,60' : d.color === 'var(--informatica)' ? '56,189,248' : '244,114,182'}, 0.1)` : 'var(--bg-elevated)',
-                      cursor: 'pointer',
-                      transition: 'all var(--transition)',
-                      textAlign: 'center',
-                      color: 'var(--text-primary)',
-                      fontFamily: 'var(--font-sans)',
-                    }}
-                  >
-                    <div style={{ fontSize: 28, marginBottom: 4 }}>{d.emoji}</div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{d.label}</div>
-                  </button>
-                ))}
+                {DISCIPLINES.map(d => {
+                  const freq = getDisciplineFrequency(d.key);
+                  const hasData = freq > 0;
+                  return (
+                    <button
+                      key={d.key}
+                      id={`discipline-${d.key}`}
+                      onClick={() => setDiscipline(d.key)}
+                      style={{
+                        padding: 'var(--space-4)',
+                        borderRadius: 'var(--radius-lg)',
+                        border: discipline === d.key ? `2px solid ${d.color}` : hasData ? '1.5px solid rgba(123,44,191,0.30)' : '1.5px solid var(--border)',
+                        background: discipline === d.key ? `rgba(${d.color === 'var(--legislacao)' ? '129,140,248' : d.color === 'var(--logica)' ? '52,211,153' : d.color === 'var(--matematica)' ? '251,146,60' : d.color === 'var(--informatica)' ? '56,189,248' : '244,114,182'}, 0.1)` : hasData ? 'rgba(123,44,191,0.04)' : 'var(--bg-elevated)',
+                        cursor: 'pointer',
+                        transition: 'all var(--transition)',
+                        textAlign: 'center',
+                        color: 'var(--text-primary)',
+                        fontFamily: 'var(--font-sans)',
+                        position: 'relative',
+                      }}
+                    >
+                      <div style={{ fontSize: 28, marginBottom: 4 }}>{d.emoji}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{d.label}</div>
+                      {hasData && (
+                        <div style={{
+                          position: 'absolute',
+                          top: 6,
+                          right: 6,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: 'var(--accent)',
+                          background: 'rgba(123,44,191,0.12)',
+                          borderRadius: 'var(--radius-full)',
+                          padding: '1px 6px',
+                        }}>
+                          ×{freq}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
             <div className="card" style={{ marginBottom: 'var(--space-6)' }}>
               <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 'var(--space-4)' }}>Tópico</h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                {(TOPICS[discipline] || []).map(t => (
+                {getTopicsForDiscipline(discipline).map(t => (
                   <button
-                    key={t}
-                    id={`topic-${t.replace(/\s/g, '-')}`}
-                    onClick={() => setTopic(t)}
-                    className={`quiz-option${topic === t ? ' selected' : ''}`}
+                    key={t.label}
+                    id={`topic-${t.label.replace(/\s/g, '-')}`}
+                    onClick={() => setTopic(t.label)}
+                    className={`quiz-option${topic === t.label ? ' selected' : ''}`}
                   >
-                    <span className="option-letter" style={{ background: topic === t ? 'var(--accent)' : undefined, color: topic === t ? 'white' : undefined }}>
+                    <span className="option-letter" style={{ background: topic === t.label ? 'var(--accent)' : undefined, color: topic === t.label ? 'white' : undefined }}>
                       ✓
                     </span>
-                    {t}
+                    <span style={{ flex: 1, textAlign: 'left' }}>{t.label}</span>
+                    {t.fromAnalysis && (
+                      <span style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: 'var(--accent)',
+                        background: 'rgba(123,44,191,0.10)',
+                        borderRadius: 'var(--radius-full)',
+                        padding: '2px 8px',
+                        flexShrink: 0,
+                      }}>
+                        📊 ×{t.frequency}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -292,17 +446,23 @@ export default function StudyPage() {
             <div style={{ background: 'var(--bg-elevated)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-4)', marginBottom: 'var(--space-6)', fontSize: 13, color: 'var(--text-secondary)' }}>
               <div style={{ display: 'flex', gap: 'var(--space-6)' }}>
                 <span>⏱️ ~45 minutos</span>
-                <span>📝 10 questões</span>
+                <span>📝 7 questões</span>
                 <span>🎯 +100–300 XP</span>
                 <span>📖 Pré-leitura inclusa</span>
               </div>
             </div>
 
             <button className="btn btn-primary btn-lg w-full" id="btn-start-session" onClick={handleStartSession} disabled={loading}>
-              {loading ? '⏳ Iniciando...' : '🚀 Começar Sessão'}
+              {loading ? (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="spinner" style={{ width: 16, height: 16 }} />
+                  {pipelineStep || 'Iniciando...'}
+                </span>
+              ) : '🚀 Começar Sessão'}
             </button>
           </div>
         )}
+
 
         {/* PHASE: PRE-READING */}
         {phase === 'pre_reading' && (
@@ -334,20 +494,68 @@ export default function StudyPage() {
                   fontSize: 11,
                   padding: '2px 8px',
                   borderRadius: 'var(--radius-sm)',
-                  background: 'rgba(99,102,241,0.15)',
-                  color: 'var(--accent)',
+                  background: preReadingFromCache ? 'rgba(52,211,153,0.12)' : 'rgba(99,102,241,0.15)',
+                  color: preReadingFromCache ? 'var(--success)' : 'var(--accent)',
                   fontWeight: 600,
                   display: 'flex',
                   alignItems: 'center',
                   gap: 4
                 }}>
-                  🤖 Conteúdo Sintetizado por IA
+                  {preReadingFromCache ? '⚡ Do Cache' : '🤖 Conteúdo Sintetizado por IA'}
                 </span>
+                {preReadingFromCache && (
+                  <button
+                    onClick={handleRefreshPreReading}
+                    disabled={loading}
+                    title={`Gerado em ${preReadingCachedAt ? new Date(preReadingCachedAt).toLocaleString('pt-BR') : 'data desconhecida'}. Clique para regenerar.`}
+                    style={{
+                      fontSize: 11,
+                      padding: '2px 10px',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'transparent',
+                      border: '1px solid var(--border)',
+                      color: 'var(--text-tertiary)',
+                      cursor: 'pointer',
+                      fontFamily: 'var(--font-sans)',
+                    }}
+                  >
+                    {loading ? '⏳' : '🔄 Regenerar'}
+                  </button>
+                )}
+                {qualityScore && (
+                  <span
+                    title={qualityScore.feedback || 'Score de qualidade avaliado automaticamente'}
+                    style={{
+                      fontSize: 11,
+                      padding: '2px 8px',
+                      borderRadius: 'var(--radius-sm)',
+                      background: qualityScore.overallScore >= 8
+                        ? 'rgba(52,211,153,0.15)'
+                        : qualityScore.overallScore >= 6
+                        ? 'rgba(251,146,60,0.15)'
+                        : 'rgba(239,68,68,0.15)',
+                      color: qualityScore.overallScore >= 8
+                        ? 'var(--success)'
+                        : qualityScore.overallScore >= 6
+                        ? '#fb923c'
+                        : 'var(--error)',
+                      fontWeight: 600,
+                      cursor: 'help',
+                    }}
+                  >
+                    🏅 Qualidade: {qualityScore.overallScore.toFixed(1)}/10
+                  </span>
+                )}
               </div>
               <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 'var(--space-1)' }}>{topic}</h2>
               {preReadingSources.length > 0 && (
                 <div style={{ marginTop: 'var(--space-3)', fontSize: 12, color: 'var(--text-secondary)' }}>
-                  📚 <strong>Fontes utilizadas:</strong> {preReadingSources.map(s => s.name).join(', ')}
+                  📚 <strong>Fontes utilizadas:</strong>{' '}
+                  {preReadingSources.map((s, i) => (
+                    s.url
+                      ? <a key={i} href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', marginRight: 8 }}>{s.name}</a>
+                      : <span key={i} style={{ marginRight: 8 }}>{s.name}</span>
+                  ))}
                 </div>
               )}
             </div>
