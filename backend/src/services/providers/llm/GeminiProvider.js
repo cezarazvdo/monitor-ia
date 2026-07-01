@@ -42,18 +42,29 @@ class GeminiProvider extends LLMProvider {
     });
   }
 
+  /**
+   * Duplica o texto do prompt antes do envio — padrão de reforço de instruções.
+   * @param {string} prompt
+   * @returns {string}
+   */
+  _doublePrompt(prompt) {
+    const separator = '\n\n---\n[REPETIÇÃO DAS INSTRUÇÕES — siga rigorosamente o que foi pedido acima]\n---\n\n';
+    return `${prompt}${separator}${prompt}`;
+  }
+
   async generate(prompt, options = {}) {
     const model = this._getModel();
     if (!model) throw new Error('GeminiProvider não configurado (GEMINI_API_KEY ausente)');
 
     const t0 = Date.now();
+    const doubledPrompt = this._doublePrompt(prompt);
     try {
-      const result = await model.generateContent(prompt);
+      const result = await model.generateContent(doubledPrompt);
       const text = result.response.text();
       logLLMCall({
         model: this._modelId,
         purpose: options.purpose || 'generate',
-        promptTokensEstimate: Math.ceil(prompt.length / 4),
+        promptTokensEstimate: Math.ceil(doubledPrompt.length / 4),
         durationMs: Date.now() - t0,
       });
       return text;
@@ -68,9 +79,10 @@ class GeminiProvider extends LLMProvider {
     if (!model) throw new Error('GeminiProvider não configurado (GEMINI_API_KEY ausente)');
 
     const t0 = Date.now();
+    const doubledPrompt = this._doublePrompt(prompt);
     try {
       const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        contents: [{ role: 'user', parts: [{ text: doubledPrompt }] }],
         generationConfig: { responseMimeType: 'application/json' },
       });
       const text = result.response.text();
@@ -79,7 +91,7 @@ class GeminiProvider extends LLMProvider {
       logLLMCall({
         model: this._modelId,
         purpose: options.purpose || 'generateJSON',
-        promptTokensEstimate: Math.ceil(prompt.length / 4),
+        promptTokensEstimate: Math.ceil(doubledPrompt.length / 4),
         durationMs: Date.now() - t0,
       });
       return parsed;
